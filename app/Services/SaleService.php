@@ -68,6 +68,11 @@ class SaleService
 
         // Bulk
         $accessory = Accessory::lockForUpdate()->findOrFail($item['accessory_id']);
+
+        if (!$accessory->is_active) {
+            throw new \Exception("Aksessuar partiyasi deaktivatsiya qilingan: {$accessory->barcode}");
+        }
+
         $available = $accessory->quantity - $accessory->sold_quantity - $accessory->consigned_quantity;
         $quantity = $item['quantity'] ?? 1;
 

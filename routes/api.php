@@ -34,6 +34,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('rates/current', [RateController::class, 'current']);
 
     // Sales
+    Route::get('sales/search-products', [SaleScanController::class, 'searchProducts']);
     Route::get('sales/scan/{barcode}', [SaleScanController::class, 'scanBarcode']);
     Route::get('sales/scan-imei/{imei}', [SaleScanController::class, 'scanImei']);
     Route::post('sales', [SaleController::class, 'store']);

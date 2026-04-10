@@ -2,12 +2,16 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Enums\InvestmentType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreInvestorRequest;
 use App\Http\Requests\Admin\UpdateInvestorRequest;
+use App\Models\Investment;
 use App\Models\Investor;
+use App\Models\Rate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class InvestorController extends Controller
 {
@@ -29,10 +33,30 @@ class InvestorController extends Controller
 
     public function store(StoreInvestorRequest $request): JsonResponse
     {
-        $investor = Investor::create([
-            ...$request->validated(),
-            'created_by' => $request->user()->id,
-        ]);
+        $investor = DB::transaction(function () use ($request) {
+            $investor = Investor::create([
+                ...$request->validated(),
+                'created_by' => $request->user()->id,
+            ]);
+
+            $balance = (float) ($request->validated()['balance'] ?? 0);
+
+            if ($balance > 0) {
+                $rate = Rate::current();
+
+                Investment::create([
+                    'investor_id' => $investor->id,
+                    'type' => InvestmentType::Investment,
+                    'is_credit' => true,
+                    'amount' => $balance,
+                    'rate' => $rate?->rate ?? 0,
+                    'comment' => 'Boshlang\'ich sarmoya',
+                    'created_by' => $request->user()->id,
+                ]);
+            }
+
+            return $investor;
+        });
 
         return response()->json($investor, 201);
     }

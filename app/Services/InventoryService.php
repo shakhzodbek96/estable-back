@@ -53,8 +53,8 @@ class InventoryService
                     'created_by' => auth()->id(),
                 ]);
 
-                Investor::where('id', $data['investor_id'])
-                    ->decrement('balance', $totalCost);
+                $investor = Investor::lockForUpdate()->find($data['investor_id']);
+                $investor->decrement('balance', $totalCost);
             }
 
             return $inventories;
@@ -95,8 +95,8 @@ class InventoryService
             ]);
 
             if ($inventory->investor_id) {
-                Investor::where('id', $inventory->investor_id)
-                    ->decrement('balance', $data['amount']);
+                $investor = Investor::lockForUpdate()->find($inventory->investor_id);
+                $investor->decrement('balance', $data['amount']);
             }
 
             return $cost;

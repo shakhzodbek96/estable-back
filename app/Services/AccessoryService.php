@@ -44,8 +44,8 @@ class AccessoryService
                     'created_by' => auth()->id(),
                 ]);
 
-                Investor::where('id', $data['investor_id'])
-                    ->decrement('balance', $totalCost);
+                $investor = Investor::lockForUpdate()->find($data['investor_id']);
+                $investor->decrement('balance', $totalCost);
             }
 
             return $accessory;

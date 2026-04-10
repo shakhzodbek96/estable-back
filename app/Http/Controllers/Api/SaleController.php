@@ -2,12 +2,15 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\InventoryStatus;
+use App\Enums\SalePaymentStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Sale\StoreSaleRequest;
 use App\Models\Sale;
 use App\Services\SaleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class SaleController extends Controller
 {
@@ -69,7 +72,7 @@ class SaleController extends Controller
 
     public function destroy(Sale $sale): JsonResponse
     {
-        $allNew = $sale->payments()->where('status', '!=', 'new')->count() === 0;
+        $allNew = $sale->payments()->where('status', '!=', SalePaymentStatus::New)->count() === 0;
         $isOwner = $sale->sold_by === auth()->id();
         $isAdmin = auth()->user()->role->value === 'admin';
 
@@ -81,26 +84,27 @@ class SaleController extends Controller
             return response()->json(['message' => 'Faqat yaratuvchi yoki admin o\'chirishi mumkin'], 403);
         }
 
-        // Revert inventory/accessory changes
-        foreach ($sale->items as $item) {
-            if ($item->item_type->value === 'serial' && $item->inventory) {
-                $item->inventory->update([
-                    'status' => 'in_stock',
-                    'sold_price' => null,
-                    'sold_at' => null,
-                ]);
-            } elseif ($item->item_type->value === 'bulk' && $item->accessory) {
-                $item->accessory->decrement('sold_quantity', $item->quantity);
-                $accessory = $item->accessory->fresh();
-                if ($accessory->quantity - $accessory->sold_quantity - $accessory->consigned_quantity > 0) {
-                    $accessory->update(['is_active' => true]);
+        DB::transaction(function () use ($sale) {
+            foreach ($sale->items as $item) {
+                if ($item->item_type->value === 'serial' && $item->inventory) {
+                    $item->inventory->update([
+                        'status' => InventoryStatus::InStock,
+                        'sold_price' => null,
+                        'sold_at' => null,
+                    ]);
+                } elseif ($item->item_type->value === 'bulk' && $item->accessory) {
+                    $item->accessory->decrement('sold_quantity', $item->quantity);
+                    $accessory = $item->accessory->fresh();
+                    if ($accessory->quantity - $accessory->sold_quantity - $accessory->consigned_quantity > 0) {
+                        $accessory->update(['is_active' => true]);
+                    }
                 }
             }
-        }
 
-        $sale->payments()->delete();
-        $sale->items()->delete();
-        $sale->delete();
+            $sale->payments()->delete();
+            $sale->items()->delete();
+            $sale->delete();
+        });
 
         return response()->json(['message' => 'Deleted']);
     }
