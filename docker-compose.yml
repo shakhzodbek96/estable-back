@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  app:
+    container_name: vipay_erp_backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /var/www/html
+    volumes:
+      - .:/var/www/html
+    ports:
+      - "8000:8000"
+    environment:
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres-server
+      DB_PORT: 5432
+      DB_DATABASE: vipay_erp
+      DB_USERNAME: root
+      DB_PASSWORD: secret
+    networks:
+      - shared-network
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+  shared-network:
+    external: true
