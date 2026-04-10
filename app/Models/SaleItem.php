@@ -16,6 +16,8 @@ class SaleItem extends Model
         'quantity',
         'unit_price',
         'subtotal',
+        'warranty_months',
+        'warranty_note',
     ];
 
     protected function casts(): array

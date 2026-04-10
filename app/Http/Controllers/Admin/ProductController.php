@@ -23,6 +23,10 @@ class ProductController extends Controller
             $query->where('category_id', $categoryId);
         }
 
+        if ($type = $request->string('type')->trim()->value()) {
+            $query->where('type', $type);
+        }
+
         $perPage = (int) $request->integer('per_page', 15);
         $perPage = max(1, min($perPage, 100));
 

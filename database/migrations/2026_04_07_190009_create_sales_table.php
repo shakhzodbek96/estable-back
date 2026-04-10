@@ -13,8 +13,6 @@ return new class extends Migration
             $table->id();
             $table->foreignId('customer_id')->nullable()->constrained()->nullOnDelete();
             $table->date('sale_date')->default(DB::raw('CURRENT_DATE'))->index();
-            $table->integer('warranty_months')->nullable();
-            $table->text('warranty_note')->nullable();
             $table->decimal('total_price', 12, 2);
             $table->string('payment_method');
             $table->foreignId('investor_id')->nullable()->constrained()->nullOnDelete();

@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Enums\ProductType;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Enum;
 
 class UpdateProductRequest extends FormRequest
 {
@@ -18,6 +20,7 @@ class UpdateProductRequest extends FormRequest
 
         return [
             'category_id' => ['sometimes', 'required', 'integer', 'exists:categories,id'],
+            'type' => ['sometimes', 'required', new Enum(ProductType::class)],
             'name' => [
                 'sometimes',
                 'required',

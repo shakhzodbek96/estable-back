@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Enums\ProductType;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rules\Enum;
 
 class StoreProductRequest extends FormRequest
 {
@@ -15,6 +17,7 @@ class StoreProductRequest extends FormRequest
     {
         return [
             'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'type' => ['required', new Enum(ProductType::class)],
             'name' => ['required', 'string', 'max:255', 'unique:products,name'],
         ];
     }
