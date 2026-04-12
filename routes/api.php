@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\SaleScanController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ReturnController;
 use App\Http\Controllers\Api\InventoryStatusController;
+use App\Http\Controllers\Api\ConsignmentController;
 use App\Http\Controllers\Auth\AuthController;
 use Illuminate\Support\Facades\Route;
 
@@ -68,6 +69,16 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::post('inventories/{inventory}/send-to-repair', [InventoryStatusController::class, 'sendToRepair']);
     Route::post('inventories/{inventory}/return-from-repair', [InventoryStatusController::class, 'returnFromRepair']);
     Route::post('inventories/{inventory}/write-off', [InventoryStatusController::class, 'writeOff']);
+
+    // Consignments
+    Route::get('consignments', [ConsignmentController::class, 'index']);
+    Route::post('consignments', [ConsignmentController::class, 'store']);
+    Route::post('consignments/report-sale', [ConsignmentController::class, 'reportSale']);
+    Route::post('consignments/pay-partner', [ConsignmentController::class, 'payPartner']);
+    Route::get('consignments/{consignment}', [ConsignmentController::class, 'show']);
+    Route::post('consignments/{consignment}/return-items', [ConsignmentController::class, 'returnItems']);
+    Route::post('consignments/{consignment}/cancel', [ConsignmentController::class, 'cancel']);
+    Route::get('partners/{partner}/consignments', [ConsignmentController::class, 'partnerConsignments']);
 
     // Reports
     Route::prefix('reports')->group(function () {

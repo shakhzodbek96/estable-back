@@ -13,7 +13,12 @@ class ShopController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Shop::query()->with('creator:id,name,username');
+        $query = Shop::query()
+            ->with('creator:id,name,username')
+            ->withCount('users')
+            ->withCount(['users as admins_count' => fn($q) => $q->where('role', 'admin')])
+            ->withCount(['users as managers_count' => fn($q) => $q->where('role', 'manager')])
+            ->withCount(['users as sellers_count' => fn($q) => $q->where('role', 'seller')]);
 
         if ($search = $request->string('search')->trim()->value()) {
             $query->where('name', 'ilike', "%{$search}%");

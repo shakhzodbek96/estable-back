@@ -54,7 +54,7 @@ class SaleService
                 'sold_at' => now(),
             ]);
 
-            return SaleItem::create([
+            $saleItem = SaleItem::create([
                 'sale_id' => $sale->id,
                 'item_type' => 'serial',
                 'inventory_id' => $inventory->id,
@@ -64,6 +64,12 @@ class SaleService
                 'warranty_months' => $item['warranty_months'] ?? null,
                 'warranty_note' => $item['warranty_note'] ?? null,
             ]);
+
+            // Konsignatsiya tovari bo'lsa partner balansini yangilash
+            $saleItem->load('inventory');
+            app(ConsignmentService::class)->handleIncomingItemSold($saleItem);
+
+            return $saleItem;
         }
 
         // Bulk
@@ -87,7 +93,7 @@ class SaleService
             $fresh->update(['is_active' => false]);
         }
 
-        return SaleItem::create([
+        $saleItem = SaleItem::create([
             'sale_id' => $sale->id,
             'item_type' => 'bulk',
             'accessory_id' => $accessory->id,
@@ -97,6 +103,12 @@ class SaleService
             'warranty_months' => $item['warranty_months'] ?? null,
             'warranty_note' => $item['warranty_note'] ?? null,
         ]);
+
+        // Konsignatsiya tovari bo'lsa partner balansini yangilash
+        $saleItem->load('accessory');
+        app(ConsignmentService::class)->handleIncomingItemSold($saleItem);
+
+        return $saleItem;
     }
 
     private function createSalePayment(Sale $sale, array $payment): SalePayment
