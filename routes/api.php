@@ -13,7 +13,11 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\QuickCustomerController;
 use App\Http\Controllers\Api\SaleController;
+use App\Http\Controllers\Api\SalePaymentController;
 use App\Http\Controllers\Api\SaleScanController;
+use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\ReturnController;
+use App\Http\Controllers\Api\InventoryStatusController;
 use App\Http\Controllers\Auth\AuthController;
 use Illuminate\Support\Facades\Route;
 
@@ -41,6 +45,41 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('sales', [SaleController::class, 'index']);
     Route::get('sales/{sale}', [SaleController::class, 'show']);
     Route::delete('sales/{sale}', [SaleController::class, 'destroy']);
+});
+
+// Admin/Manager — to'lovlarni boshqarish
+Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
+    Route::get('sale-payments/pending', [SalePaymentController::class, 'pending']);
+    Route::post('sale-payments/bulk-accept', [SalePaymentController::class, 'bulkAccept']);
+    Route::get('sale-payments/{salePayment}', [SalePaymentController::class, 'show']);
+    Route::post('sale-payments/{salePayment}/accept', [SalePaymentController::class, 'accept']);
+    Route::post('sale-payments/{salePayment}/reject', [SalePaymentController::class, 'reject']);
+    Route::get('sellers/{user}/cash-summary', [SalePaymentController::class, 'cashSummary']);
+
+    // Returns
+    Route::get('returns', [ReturnController::class, 'index']);
+    Route::post('returns', [ReturnController::class, 'store']);
+    Route::get('returns/by-sale/{sale}', [ReturnController::class, 'bySale']);
+    Route::get('returns/{return}', [ReturnController::class, 'show']);
+    Route::post('returns/{return}/approve', [ReturnController::class, 'approve']);
+    Route::post('returns/{return}/reject', [ReturnController::class, 'reject']);
+
+    // Inventory status changes
+    Route::post('inventories/{inventory}/send-to-repair', [InventoryStatusController::class, 'sendToRepair']);
+    Route::post('inventories/{inventory}/return-from-repair', [InventoryStatusController::class, 'returnFromRepair']);
+    Route::post('inventories/{inventory}/write-off', [InventoryStatusController::class, 'writeOff']);
+
+    // Reports
+    Route::prefix('reports')->group(function () {
+        Route::get('dashboard', [ReportController::class, 'dashboard']);
+        Route::get('profit', [ReportController::class, 'profit']);
+        Route::get('inventory', [ReportController::class, 'inventory']);
+        Route::get('top-products', [ReportController::class, 'topProducts']);
+        Route::get('sellers', [ReportController::class, 'sellers']);
+        Route::get('top-customers', [ReportController::class, 'topCustomers']);
+        Route::get('investors/{investor}', [ReportController::class, 'investorReport']);
+        Route::get('expenses', [ReportController::class, 'expenses']);
+    });
 });
 
 // Admin only
