@@ -334,9 +334,10 @@ class ConsignmentService
                         $consignmentItem->inventory->update(['status' => InventoryStatus::ReturnedToPartner]);
                     } elseif ($consignmentItem->accessory) {
                         $consignmentItem->accessory->decrement('quantity', $quantity);
-                        $fresh = $consignmentItem->accessory->fresh();
-                        if ($fresh->quantity <= 0) {
-                            $fresh->update(['is_active' => false]);
+                        // fresh() o'rniga hisoblab tekshirish
+                        $newQty = $consignmentItem->accessory->quantity - $quantity;
+                        if ($newQty <= 0) {
+                            $consignmentItem->accessory->update(['is_active' => false]);
                         }
                     }
                 }
@@ -356,7 +357,7 @@ class ConsignmentService
             throw new \Exception("Tugallangan konsignatsiyani bekor qilib bo'lmaydi");
         }
 
-        $pendingItems = $consignment->items->filter(function ($item) {
+        $pendingItems = $consignment->items()->get()->filter(function ($item) {
             return $item->quantity - $item->sold_quantity - $item->returned_quantity > 0;
         });
 

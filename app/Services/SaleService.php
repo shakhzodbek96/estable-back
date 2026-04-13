@@ -66,7 +66,7 @@ class SaleService
             ]);
 
             // Konsignatsiya tovari bo'lsa partner balansini yangilash
-            $saleItem->load('inventory');
+            $saleItem->setRelation('inventory', $inventory);
             app(ConsignmentService::class)->handleIncomingItemSold($saleItem);
 
             return $saleItem;
@@ -88,9 +88,10 @@ class SaleService
 
         $accessory->increment('sold_quantity', $quantity);
 
-        $fresh = $accessory->fresh();
-        if ($fresh->quantity - $fresh->sold_quantity - $fresh->consigned_quantity == 0) {
-            $fresh->update(['is_active' => false]);
+        // fresh() o'rniga increment natijasini hisobga olamiz
+        $newAvailable = $accessory->quantity - ($accessory->sold_quantity + $quantity) - $accessory->consigned_quantity;
+        if ($newAvailable <= 0) {
+            $accessory->update(['is_active' => false]);
         }
 
         $saleItem = SaleItem::create([
@@ -105,7 +106,7 @@ class SaleService
         ]);
 
         // Konsignatsiya tovari bo'lsa partner balansini yangilash
-        $saleItem->load('accessory');
+        $saleItem->setRelation('accessory', $accessory);
         app(ConsignmentService::class)->handleIncomingItemSold($saleItem);
 
         return $saleItem;
@@ -144,13 +145,26 @@ class SaleService
 
     private function determineInvestor(array $items): ?int
     {
-        $investorIds = collect($items)->map(function ($item) {
-            if ($item['item_type'] === 'serial') {
-                return Inventory::find($item['inventory_id'])?->investor_id;
-            }
-            return Accessory::find($item['accessory_id'])?->investor_id;
-        })->unique()->filter();
+        $collection = collect($items);
 
-        return $investorIds->count() === 1 ? $investorIds->first() : null;
+        // Batch load — N query o'rniga 2 ta query
+        $serialIds = $collection->where('item_type', 'serial')->pluck('inventory_id')->filter()->values();
+        $bulkIds = $collection->where('item_type', 'bulk')->pluck('accessory_id')->filter()->values();
+
+        $investorIds = collect();
+
+        if ($serialIds->isNotEmpty()) {
+            $investorIds = $investorIds->merge(
+                Inventory::whereIn('id', $serialIds)->whereNotNull('investor_id')->pluck('investor_id')
+            );
+        }
+        if ($bulkIds->isNotEmpty()) {
+            $investorIds = $investorIds->merge(
+                Accessory::whereIn('id', $bulkIds)->whereNotNull('investor_id')->pluck('investor_id')
+            );
+        }
+
+        $unique = $investorIds->unique()->filter();
+        return $unique->count() === 1 ? $unique->first() : null;
     }
 }

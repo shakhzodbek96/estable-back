@@ -69,7 +69,7 @@ class SaleScanController extends Controller
             $serialQuery->where('shop_id', $shopId);
         }
 
-        $serials = $serialQuery->limit(15)->get();
+        $serials = $serialQuery->select('id', 'product_id', 'serial_number', 'extra_serial_number', 'selling_price', 'status', 'shop_id', 'investor_id')->limit(15)->get();
 
         // Bulk: active accessories — tovar nomi yoki barcode bo'yicha
         $bulkQuery = Accessory::with(['product:id,name,type'])
@@ -84,7 +84,7 @@ class SaleScanController extends Controller
             $bulkQuery->where('shop_id', $shopId);
         }
 
-        $bulks = $bulkQuery->orderBy('created_at', 'asc')->limit(15)->get();
+        $bulks = $bulkQuery->select('id', 'product_id', 'barcode', 'quantity', 'sold_quantity', 'consigned_quantity', 'sell_price', 'shop_id')->orderBy('created_at', 'asc')->limit(15)->get();
 
         return response()->json([
             'serial' => $serials,

@@ -20,7 +20,8 @@ class SaleController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Sale::with(['customer:id,name,phone', 'seller:id,name', 'shop:id,name'])
+        $query = Sale::select('id', 'customer_id', 'sale_date', 'total_price', 'payment_method', 'shop_id', 'sold_by', 'created_at')
+            ->with(['customer:id,name,phone', 'seller:id,name', 'shop:id,name'])
             ->withCount('items');
 
         if ($dateFrom = $request->string('date_from')->trim()->value()) {
@@ -85,6 +86,7 @@ class SaleController extends Controller
         }
 
         DB::transaction(function () use ($sale) {
+            $sale->load('items.inventory', 'items.accessory');
             foreach ($sale->items as $item) {
                 if ($item->item_type->value === 'serial' && $item->inventory) {
                     $item->inventory->update([

@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ReturnController;
 use App\Http\Controllers\Api\InventoryStatusController;
 use App\Http\Controllers\Api\ConsignmentController;
+use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Auth\AuthController;
 use Illuminate\Support\Facades\Route;
 
@@ -69,6 +70,10 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::post('inventories/{inventory}/send-to-repair', [InventoryStatusController::class, 'sendToRepair']);
     Route::post('inventories/{inventory}/return-from-repair', [InventoryStatusController::class, 'returnFromRepair']);
     Route::post('inventories/{inventory}/write-off', [InventoryStatusController::class, 'writeOff']);
+
+    // Transactions
+    Route::get('transactions', [TransactionController::class, 'index']);
+    Route::get('transactions/{transaction}', [TransactionController::class, 'show']);
 
     // Consignments
     Route::get('consignments', [ConsignmentController::class, 'index']);

@@ -146,9 +146,13 @@ class SalePaymentService
     {
         $results = ['accepted' => 0, 'errors' => []];
 
+        // Batch load — N query o'rniga 1 ta
+        $payments = SalePayment::whereIn('id', $paymentIds)->get()->keyBy('id');
+
         foreach ($paymentIds as $id) {
             try {
-                $payment = SalePayment::findOrFail($id);
+                $payment = $payments->get($id);
+                if (!$payment) throw new \Exception("To'lov #{$id} topilmadi");
                 $this->accept($payment);
                 $results['accepted']++;
             } catch (\Exception $e) {
@@ -167,33 +171,37 @@ class SalePaymentService
      */
     public function getCashSummary(int $sellerId, ?string $dateFrom = null, ?string $dateTo = null): array
     {
-        $query = SalePayment::where('created_by', $sellerId);
+        // 1 ta query bilan barcha statistikani olish
+        $stats = SalePayment::where('created_by', $sellerId)
+            ->when($dateFrom, fn($q, $d) => $q->whereDate('created_at', '>=', $d))
+            ->when($dateTo, fn($q, $d) => $q->whereDate('created_at', '<=', $d))
+            ->selectRaw("status, currency, COUNT(*) as count, SUM(amount) as total")
+            ->groupBy('status', 'currency')
+            ->get();
 
-        if ($dateFrom) {
-            $query->whereDate('created_at', '>=', $dateFrom);
-        }
-        if ($dateTo) {
-            $query->whereDate('created_at', '<=', $dateTo);
-        }
+        $get = fn(string $status, string $currency = 'usd') =>
+            $stats->where('status', $status)->where('currency', $currency)->first();
 
-        $pending = (clone $query)->where('status', SalePaymentStatus::New);
-        $accepted = (clone $query)->where('status', SalePaymentStatus::Accepted);
-        $rejected = (clone $query)->where('status', SalePaymentStatus::Rejected);
+        $count = fn(string $status) =>
+            (int) $stats->where('status', $status)->sum('count');
 
-        $byType = (clone $query)
+        // by_type query — bu alohida, chunki type ham kerak
+        $byType = SalePayment::where('created_by', $sellerId)
+            ->when($dateFrom, fn($q, $d) => $q->whereDate('created_at', '>=', $d))
+            ->when($dateTo, fn($q, $d) => $q->whereDate('created_at', '<=', $d))
             ->selectRaw("type, status, currency, COUNT(*) as count, SUM(amount) as total")
             ->groupBy('type', 'status', 'currency')
             ->get();
 
         return [
-            'pending_count' => (clone $pending)->count(),
-            'pending_sum' => round((float) (clone $pending)->where('currency', 'usd')->sum('amount'), 2),
-            'pending_sum_uzs' => round((float) (clone $pending)->where('currency', 'uzs')->sum('amount'), 2),
-            'accepted_count' => (clone $accepted)->count(),
-            'accepted_sum' => round((float) (clone $accepted)->where('currency', 'usd')->sum('amount'), 2),
-            'accepted_sum_uzs' => round((float) (clone $accepted)->where('currency', 'uzs')->sum('amount'), 2),
-            'rejected_count' => (clone $rejected)->count(),
-            'rejected_sum' => round((float) (clone $rejected)->where('currency', 'usd')->sum('amount'), 2),
+            'pending_count' => $count(SalePaymentStatus::New->value),
+            'pending_sum' => round((float) ($get(SalePaymentStatus::New->value, 'usd')?->total ?? 0), 2),
+            'pending_sum_uzs' => round((float) ($get(SalePaymentStatus::New->value, 'uzs')?->total ?? 0), 2),
+            'accepted_count' => $count(SalePaymentStatus::Accepted->value),
+            'accepted_sum' => round((float) ($get(SalePaymentStatus::Accepted->value, 'usd')?->total ?? 0), 2),
+            'accepted_sum_uzs' => round((float) ($get(SalePaymentStatus::Accepted->value, 'uzs')?->total ?? 0), 2),
+            'rejected_count' => $count(SalePaymentStatus::Rejected->value),
+            'rejected_sum' => round((float) ($get(SalePaymentStatus::Rejected->value, 'usd')?->total ?? 0), 2),
             'by_type' => $byType,
         ];
     }

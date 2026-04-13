@@ -154,18 +154,40 @@ class ReportService
             ->orderByRaw("{$dateExpr}")
             ->get();
 
-        // Har bir davr uchun tannarx hisoblash
+        // Barcha sale ID'larni bir marta olish (period bilan)
+        $allSales = Sale::query()
+            ->whereBetween('sale_date', [$dateFrom, $dateTo])
+            ->whereHas('payments', fn($q) => $q->where('status', SalePaymentStatus::Accepted))
+            ->when($shopId, fn($q, $id) => $q->where('shop_id', $id))
+            ->selectRaw("id, {$dateExpr} as period")
+            ->get();
+
+        $salesByPeriod = $allSales->groupBy('period');
+
+        // Barcha tannarxni bir marta hisoblash (2 ta query)
+        $allSaleIds = $allSales->pluck('id');
+        $serialCosts = $allSaleIds->isNotEmpty()
+            ? SaleItem::whereIn('sale_id', $allSaleIds)->where('item_type', 'serial')
+                ->join('inventories', 'sale_items.inventory_id', '=', 'inventories.id')
+                ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+                ->selectRaw("{$dateExpr} as period, SUM(inventories.purchase_price + inventories.extra_cost) as cost")
+                ->groupByRaw($dateExpr)
+                ->pluck('cost', 'period')
+            : collect();
+
+        $bulkCosts = $allSaleIds->isNotEmpty()
+            ? SaleItem::whereIn('sale_id', $allSaleIds)->where('item_type', 'bulk')
+                ->join('accessories', 'sale_items.accessory_id', '=', 'accessories.id')
+                ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+                ->selectRaw("{$dateExpr} as period, SUM(accessories.purchase_price * sale_items.quantity) as cost")
+                ->groupByRaw($dateExpr)
+                ->pluck('cost', 'period')
+            : collect();
+
         $periods = [];
         foreach ($salesData as $row) {
-            $periodSaleIds = Sale::query()
-                ->whereBetween('sale_date', [$dateFrom, $dateTo])
-                ->whereHas('payments', fn($q) => $q->where('status', SalePaymentStatus::Accepted))
-                ->when($shopId, fn($q, $id) => $q->where('shop_id', $id))
-                ->whereRaw("{$dateExpr} = ?", [$row->period])
-                ->pluck('id');
-
-            $cost = $this->calculateCost($periodSaleIds);
             $revenue = (float) $row->revenue;
+            $cost = (float) ($serialCosts[$row->period] ?? 0) + (float) ($bulkCosts[$row->period] ?? 0);
 
             $periods[] = [
                 'period' => $row->period,
@@ -298,19 +320,49 @@ class ReportService
             ->orderByDesc('total_revenue')
             ->get();
 
-        return $sellers->map(function ($row) use ($dateFrom, $dateTo) {
-            $sellerSaleIds = Sale::where('sold_by', $row->seller_id)
-                ->whereBetween('sale_date', [$dateFrom, $dateTo])
-                ->pluck('id');
+        // Barcha sale ID'larni oldindan olish (sotuvchi bo'yicha)
+        $allSales = Sale::query()
+            ->whereBetween('sale_date', [$dateFrom, $dateTo])
+            ->when($shopId, fn($q, $id) => $q->where('shop_id', $id))
+            ->select('id', 'sold_by')
+            ->get();
 
-            $cost = $this->calculateCost($sellerSaleIds);
+        $salesBySeller = $allSales->groupBy('sold_by');
+        $allSaleIds = $allSales->pluck('id');
+
+        // Tannarx — sotuvchi bo'yicha (2 ta query)
+        $serialCostBySeller = $allSaleIds->isNotEmpty()
+            ? SaleItem::whereIn('sale_items.sale_id', $allSaleIds)->where('item_type', 'serial')
+                ->join('inventories', 'sale_items.inventory_id', '=', 'inventories.id')
+                ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+                ->selectRaw("sales.sold_by, SUM(inventories.purchase_price + inventories.extra_cost) as cost")
+                ->groupBy('sales.sold_by')
+                ->pluck('cost', 'sold_by')
+            : collect();
+
+        $bulkCostBySeller = $allSaleIds->isNotEmpty()
+            ? SaleItem::whereIn('sale_items.sale_id', $allSaleIds)->where('item_type', 'bulk')
+                ->join('accessories', 'sale_items.accessory_id', '=', 'accessories.id')
+                ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+                ->selectRaw("sales.sold_by, SUM(accessories.purchase_price * sale_items.quantity) as cost")
+                ->groupBy('sales.sold_by')
+                ->pluck('cost', 'sold_by')
+            : collect();
+
+        // Payment stats — barcha sotuvchilar uchun 1 ta query
+        $paymentStats = $allSaleIds->isNotEmpty()
+            ? SalePayment::whereIn('sale_id', $allSaleIds)
+                ->join('sales', 'sale_payments.sale_id', '=', 'sales.id')
+                ->selectRaw("sales.sold_by, sale_payments.status, COUNT(*) as count")
+                ->groupBy('sales.sold_by', 'sale_payments.status')
+                ->get()
+                ->groupBy('sold_by')
+            : collect();
+
+        return $sellers->map(function ($row) use ($serialCostBySeller, $bulkCostBySeller, $paymentStats) {
             $revenue = (float) $row->total_revenue;
-
-            $paymentStats = SalePayment::query()
-                ->whereIn('sale_id', $sellerSaleIds)
-                ->selectRaw("status, COUNT(*) as count")
-                ->groupBy('status')
-                ->pluck('count', 'status');
+            $cost = (float) ($serialCostBySeller[$row->seller_id] ?? 0) + (float) ($bulkCostBySeller[$row->seller_id] ?? 0);
+            $stats = $paymentStats[$row->seller_id] ?? collect();
 
             return [
                 'seller_id' => $row->seller_id,
@@ -320,9 +372,9 @@ class ReportService
                 'total_cost' => round($cost, 2),
                 'total_profit' => round($revenue - $cost, 2),
                 'avg_sale' => $row->sales_count > 0 ? round($revenue / $row->sales_count, 2) : 0,
-                'accepted' => (int) ($paymentStats[SalePaymentStatus::Accepted->value] ?? 0),
-                'rejected' => (int) ($paymentStats[SalePaymentStatus::Rejected->value] ?? 0),
-                'pending' => (int) ($paymentStats[SalePaymentStatus::New->value] ?? 0),
+                'accepted' => (int) ($stats->where('status', SalePaymentStatus::Accepted->value)->sum('count')),
+                'rejected' => (int) ($stats->where('status', SalePaymentStatus::Rejected->value)->sum('count')),
+                'pending' => (int) ($stats->where('status', SalePaymentStatus::New->value)->sum('count')),
             ];
         })->values()->toArray();
     }
