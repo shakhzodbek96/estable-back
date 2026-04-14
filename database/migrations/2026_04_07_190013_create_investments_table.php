@@ -11,7 +11,8 @@ return new class extends Migration
         Schema::create('investments', function (Blueprint $table) {
             $table->id();
             $table->foreignId('investor_id')->constrained()->cascadeOnDelete();
-            $table->integer('type'); // 1-investment, 2-dividend, 3-clients_payment, 4-buying_product
+            $table->integer('type') // 1-investment, 2-dividend, 3-clients_payment, 4-buying_product
+                    ->comment('1-investment, 2-dividend, 3-clients_payment, 4-buying_product');
             $table->boolean('is_credit');
             $table->decimal('amount', 12, 2);
             $table->decimal('rate', 12, 2);

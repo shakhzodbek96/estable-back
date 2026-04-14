@@ -10,6 +10,7 @@ class Investment extends Model
 {
     protected $fillable = [
         'investor_id',
+        'transaction_id',
         'type',
         'is_credit',
         'amount',
@@ -31,6 +32,11 @@ class Investment extends Model
     public function investor(): BelongsTo
     {
         return $this->belongsTo(Investor::class);
+    }
+
+    public function transaction(): BelongsTo
+    {
+        return $this->belongsTo(Transaction::class);
     }
 
     public function creator(): BelongsTo

@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\ReturnController;
 use App\Http\Controllers\Api\InventoryStatusController;
 use App\Http\Controllers\Api\ConsignmentController;
 use App\Http\Controllers\Api\TransactionController;
+use App\Http\Controllers\Api\InvestmentController;
 use App\Http\Controllers\Auth\AuthController;
 use Illuminate\Support\Facades\Route;
 
@@ -74,6 +75,13 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     // Transactions
     Route::get('transactions', [TransactionController::class, 'index']);
     Route::get('transactions/{transaction}', [TransactionController::class, 'show']);
+
+    // Investments (investor <-> admin hisob-kitoblari)
+    Route::get('investments', [InvestmentController::class, 'index']);
+    Route::get('investments/totals', [InvestmentController::class, 'totals']);
+    Route::post('investments', [InvestmentController::class, 'store']);
+    Route::put('investments/{investment}', [InvestmentController::class, 'update']);
+    Route::delete('investments/{investment}', [InvestmentController::class, 'destroy']);
 
     // Consignments
     Route::get('consignments', [ConsignmentController::class, 'index']);

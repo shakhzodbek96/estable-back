@@ -172,6 +172,27 @@ class ConsignmentService
             $totalAmount = (float) $item->agreed_price * $quantity;
             $rate = Rate::current();
 
+            $investorIdForTx = $item->item_type->value === 'serial'
+                ? $item->inventory?->investor_id
+                : $item->accessory?->investor_id;
+
+            $consignmentTx = Transaction::create([
+                'amount' => $totalAmount,
+                'currency' => 'usd',
+                'rate' => $rate?->rate ?? 0,
+                'is_credit' => true,
+                'type' => TransactionType::ConsignmentReceipt,
+                'transaction_date' => now()->toDateString(),
+                'shop_id' => $consignment->shop_id,
+                'investor_id' => $investorIdForTx,
+                'created_by' => auth()->id(),
+                'accepted_by' => auth()->id(),
+                'details' => [
+                    'consignment_id' => $consignment->id,
+                    'consignment_item_id' => $item->id,
+                ],
+            ]);
+
             if ($item->item_type->value === 'serial') {
                 $inventory = $item->inventory;
                 $inventory->update([
@@ -187,6 +208,7 @@ class ConsignmentService
 
                     Investment::create([
                         'investor_id' => $inventory->investor_id,
+                        'transaction_id' => $consignmentTx->id,
                         'type' => InvestmentType::ClientsPayment,
                         'is_credit' => true,
                         'amount' => $totalAmount,
@@ -207,6 +229,7 @@ class ConsignmentService
 
                     Investment::create([
                         'investor_id' => $accessory->investor_id,
+                        'transaction_id' => $consignmentTx->id,
                         'type' => InvestmentType::ClientsPayment,
                         'is_credit' => true,
                         'amount' => $totalAmount,
@@ -216,25 +239,6 @@ class ConsignmentService
                     ]);
                 }
             }
-
-            Transaction::create([
-                'amount' => $totalAmount,
-                'currency' => 'usd',
-                'rate' => $rate?->rate ?? 0,
-                'is_credit' => true,
-                'type' => TransactionType::ConsignmentReceipt,
-                'transaction_date' => now()->toDateString(),
-                'shop_id' => $consignment->shop_id,
-                'investor_id' => $item->item_type->value === 'serial'
-                    ? $item->inventory->investor_id
-                    : $item->accessory->investor_id,
-                'created_by' => auth()->id(),
-                'accepted_by' => auth()->id(),
-                'details' => [
-                    'consignment_id' => $consignment->id,
-                    'consignment_item_id' => $item->id,
-                ],
-            ]);
 
             // Partner balansi: musbat (partner bizga qarzdor)
             $consignment->partner->increment('balance', $totalAmount);

@@ -43,8 +43,27 @@ class InventoryService
                 $totalCost = $data['purchase_price'] * count($data['serials']);
                 $rate = Rate::current();
 
+                $transaction = Transaction::create([
+                    'amount' => $totalCost,
+                    'currency' => 'usd',
+                    'rate' => $rate?->rate ?? 0,
+                    'is_credit' => false,
+                    'type' => TransactionType::Purchase,
+                    'transaction_date' => now()->toDateString(),
+                    'details' => [
+                        'inventory_ids' => $inventories->pluck('id')->all(),
+                        'product_id' => $data['product_id'],
+                        'serial_count' => count($data['serials']),
+                    ],
+                    'shop_id' => $data['shop_id'],
+                    'investor_id' => $data['investor_id'],
+                    'created_by' => auth()->id(),
+                    'accepted_by' => auth()->id(),
+                ]);
+
                 Investment::create([
                     'investor_id' => $data['investor_id'],
+                    'transaction_id' => $transaction->id,
                     'type' => InvestmentType::BuyingProduct,
                     'is_credit' => false,
                     'amount' => $totalCost,

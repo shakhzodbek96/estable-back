@@ -109,7 +109,7 @@ class ReturnService
             if ($return->return_type === ReturnType::Refund && $return->refund_amount > 0) {
                 $rate = Rate::current();
 
-                Transaction::create([
+                $refundTransaction = Transaction::create([
                     'amount' => $return->refund_amount,
                     'currency' => 'usd',
                     'rate' => $rate?->rate ?? 0,
@@ -133,6 +133,7 @@ class ReturnService
 
                     Investment::create([
                         'investor_id' => $investorId,
+                        'transaction_id' => $refundTransaction->id,
                         'type' => InvestmentType::ClientsPayment,
                         'is_credit' => false,
                         'amount' => $return->refund_amount,

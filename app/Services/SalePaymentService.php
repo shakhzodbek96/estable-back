@@ -64,6 +64,7 @@ class SalePaymentService
             if ($payment->investor_id) {
                 Investment::create([
                     'investor_id' => $payment->investor_id,
+                    'transaction_id' => $transaction->id,
                     'type' => InvestmentType::ClientsPayment,
                     'is_credit' => true,
                     'amount' => round($amountUsd, 2),

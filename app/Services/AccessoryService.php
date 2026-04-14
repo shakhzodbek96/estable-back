@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Enums\InvestmentType;
+use App\Enums\TransactionType;
 use App\Models\Accessory;
 use App\Models\Investment;
 use App\Models\Investor;
 use App\Models\Rate;
+use App\Models\Transaction;
 use Illuminate\Support\Facades\DB;
 
 class AccessoryService
@@ -34,8 +36,27 @@ class AccessoryService
                 $totalCost = $data['purchase_price'] * $data['quantity'];
                 $rate = Rate::current();
 
+                $transaction = Transaction::create([
+                    'amount' => $totalCost,
+                    'currency' => 'usd',
+                    'rate' => $rate?->rate ?? 0,
+                    'is_credit' => false,
+                    'type' => TransactionType::Purchase,
+                    'transaction_date' => now()->toDateString(),
+                    'details' => [
+                        'accessory_id' => $accessory->id,
+                        'barcode' => $data['barcode'],
+                        'quantity' => $data['quantity'],
+                    ],
+                    'shop_id' => $data['shop_id'],
+                    'investor_id' => $data['investor_id'],
+                    'created_by' => auth()->id(),
+                    'accepted_by' => auth()->id(),
+                ]);
+
                 Investment::create([
                     'investor_id' => $data['investor_id'],
+                    'transaction_id' => $transaction->id,
                     'type' => InvestmentType::BuyingProduct,
                     'is_credit' => false,
                     'amount' => $totalCost,

@@ -37,6 +37,10 @@ class AccessoryController extends Controller
             $query->where('shop_id', $shopId);
         }
 
+        if ($investorId = $request->integer('investor_id')) {
+            $query->where('investor_id', $investorId);
+        }
+
         $perPage = max(1, min($request->integer('per_page', 15), 100));
 
         return response()->json($query->orderByDesc('id')->paginate($perPage));
