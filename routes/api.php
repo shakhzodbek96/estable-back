@@ -117,6 +117,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
 
     Route::apiResource('shops', ShopController::class);
     Route::apiResource('categories', CategoryController::class);
+    Route::post('products/bulk', [ProductController::class, 'bulkStore']);
     Route::apiResource('products', ProductController::class);
     Route::apiResource('investors', InvestorController::class);
     Route::apiResource('partners', PartnerController::class);

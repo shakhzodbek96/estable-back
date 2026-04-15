@@ -29,6 +29,12 @@ class InventoryController extends Controller
             });
         }
 
+        if ($productSearch = $request->string('product_search')->trim()->value()) {
+            $query->whereHas('product', function ($q) use ($productSearch) {
+                $q->where('name', 'ilike', "%{$productSearch}%");
+            });
+        }
+
         if ($status = $request->string('status')->trim()->value()) {
             $query->where('status', $status);
         }

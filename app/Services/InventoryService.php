@@ -21,18 +21,22 @@ class InventoryService
         return DB::transaction(function () use ($data) {
             $inventories = collect();
 
+            $totalExtraCost = 0;
             foreach ($data['serials'] as $serial) {
+                $serialExtraCost = (float) ($serial['extra_cost'] ?? 0);
+                $totalExtraCost += $serialExtraCost;
+
                 $inventories->push(Inventory::create([
                     'product_id' => $data['product_id'],
                     'serial_number' => $serial['serial_number'],
                     'extra_serial_number' => $serial['extra_serial_number'] ?? null,
                     'purchase_price' => $data['purchase_price'],
-                    'extra_cost' => 0,
+                    'extra_cost' => $serialExtraCost,
                     'selling_price' => $data['selling_price'],
                     'status' => InventoryStatus::InStock,
                     'has_box' => $data['has_box'] ?? true,
                     'state' => $data['state'] ?? 'new',
-                    'notes' => $data['notes'] ?? null,
+                    'notes' => $serial['notes'] ?? ($data['notes'] ?? null),
                     'shop_id' => $data['shop_id'],
                     'investor_id' => $data['investor_id'] ?? null,
                     'created_by' => auth()->id(),
@@ -40,7 +44,7 @@ class InventoryService
             }
 
             if (!empty($data['investor_id'])) {
-                $totalCost = $data['purchase_price'] * count($data['serials']);
+                $totalCost = $data['purchase_price'] * count($data['serials']) + $totalExtraCost;
                 $rate = Rate::current();
 
                 $transaction = Transaction::create([

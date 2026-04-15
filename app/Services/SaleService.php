@@ -23,7 +23,7 @@ class SaleService
                 'total_price' => $this->calculateTotal($data['items']),
                 'payment_method' => $this->determinePaymentMethod($data['payments']),
                 'investor_id' => $this->determineInvestor($data['items']),
-                'shop_id' => auth()->user()->shop_id,
+                'shop_id' => $this->determineShop($data['items']),
                 'sold_by' => auth()->id(),
             ]);
 
@@ -141,6 +141,40 @@ class SaleService
     {
         if (count($payments) > 1) return 'multiple';
         return $payments[0]['type'];
+    }
+
+    /**
+     * Sotuvning do'konini tovarlardan olamiz (operator emas!).
+     * Tovar qaysi do'konda turgan bo'lsa — sotuv o'sha do'koniki.
+     * Agar savatda turli do'kon tovarlari bo'lsa — xato.
+     */
+    private function determineShop(array $items): int
+    {
+        $collection = collect($items);
+        $serialIds = $collection->where('item_type', 'serial')->pluck('inventory_id')->filter()->values();
+        $bulkIds = $collection->where('item_type', 'bulk')->pluck('accessory_id')->filter()->values();
+
+        $shopIds = collect();
+        if ($serialIds->isNotEmpty()) {
+            $shopIds = $shopIds->merge(
+                Inventory::whereIn('id', $serialIds)->pluck('shop_id')
+            );
+        }
+        if ($bulkIds->isNotEmpty()) {
+            $shopIds = $shopIds->merge(
+                Accessory::whereIn('id', $bulkIds)->pluck('shop_id')
+            );
+        }
+
+        $unique = $shopIds->unique()->filter()->values();
+        if ($unique->isEmpty()) {
+            throw new \Exception('Не удалось определить магазин товара');
+        }
+        if ($unique->count() > 1) {
+            throw new \Exception('В корзине товары из разных магазинов — продать одновременно нельзя');
+        }
+
+        return (int) $unique->first();
     }
 
     private function determineInvestor(array $items): ?int

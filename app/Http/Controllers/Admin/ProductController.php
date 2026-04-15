@@ -62,4 +62,36 @@ class ProductController extends Controller
 
         return response()->json(['message' => 'Deleted']);
     }
+
+    /**
+     * Bir vaqtning o'zida bir nechta mahsulot yaratish.
+     * Body: { category_id, type, names: ["Item 1", "Item 2"] }
+     */
+    public function bulkStore(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'type' => ['required', 'in:serial,bulk'],
+            'names' => ['required', 'array', 'min:1', 'max:100'],
+            'names.*' => ['required', 'string', 'max:255'],
+        ]);
+
+        $created = collect($data['names'])
+            ->map(fn ($name) => trim($name))
+            ->filter()
+            ->unique()
+            ->map(fn ($name) => Product::create([
+                'category_id' => $data['category_id'],
+                'type' => $data['type'],
+                'name' => $name,
+            ]))
+            ->values();
+
+        $created->each->load('category:id,name');
+
+        return response()->json([
+            'created' => $created,
+            'count' => $created->count(),
+        ], 201);
+    }
 }

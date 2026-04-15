@@ -25,6 +25,8 @@ class BulkStoreInventoryRequest extends FormRequest
             'serials' => ['required', 'array', 'min:1'],
             'serials.*.serial_number' => ['required', 'string', 'max:255', 'distinct', 'unique:inventories,serial_number'],
             'serials.*.extra_serial_number' => ['nullable', 'string', 'max:255'],
+            'serials.*.extra_cost' => ['nullable', 'numeric', 'min:0'],
+            'serials.*.notes' => ['nullable', 'string', 'max:1000'],
         ];
     }
 

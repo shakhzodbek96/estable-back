@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Enums\UserRole;
+use App\Models\Rate;
 use App\Models\Shop;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -23,10 +24,23 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        Shop::updateOrCreate(
+        $shop = Shop::updateOrCreate(
             ['name' => 'Asosiy do\'kon'],
             ['created_by' => $admin->id]
         );
+
+        // Admin'ni asosiy do'konga biriktirish
+        if (!$admin->shop_id) {
+            $admin->update(['shop_id' => $shop->id]);
+        }
+
+        // Boshlang'ich valyuta kursi (agar yo'q bo'lsa)
+        if (!Rate::exists()) {
+            Rate::create([
+                'rate' => 12850.00,
+                'created_by' => $admin->id,
+            ]);
+        }
 
         $this->call([
             CategorySeeder::class,
