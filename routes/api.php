@@ -22,7 +22,33 @@ use App\Http\Controllers\Api\ConsignmentController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\InvestmentController;
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Middleware\InitializeTenancyByOriginHeader;
 use Illuminate\Support\Facades\Route;
+
+/*
+|--------------------------------------------------------------------------
+| Tenant API Routes
+|--------------------------------------------------------------------------
+|
+| Bu fayldagi barcha endpointlar TENANT kontekstida ishlaydi.
+| Tenant `Origin` header orqali aniqlanadi (masalan:
+|   Origin: https://shop1.estable.uz  →  tenant = shop1.estable.uz).
+|
+| Agar Origin yo'q bo'lsa yoki bu domain hech qanday tenantga biriktirilmagan
+| bo'lsa — 400/404 xatolik qaytadi.
+|
+| Central endpointlar alohida faylda: routes/central.php (/api/central/*).
+|
+| NOTE: PreventAccessFromCentralDomains middleware'i olib tashlandi, chunki
+| u request'ning `Host` header'ini tekshiradi (doim `api.estable.uz`). Bizda
+| tenant identifikatsiya Origin orqali bo'lgani uchun, agar Origin noto'g'ri
+| bo'lsa InitializeTenancyByOriginHeader o'zi xatolik qaytaradi.
+|
+*/
+
+Route::middleware([
+    InitializeTenancyByOriginHeader::class,
+])->group(function () {
 
 Route::prefix('auth')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
@@ -136,3 +162,5 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('accessories/{accessory}/restock', [AccessoryController::class, 'restock']);
     Route::apiResource('accessories', AccessoryController::class);
 });
+
+}); // end tenant middleware group
