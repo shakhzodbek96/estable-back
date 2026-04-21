@@ -16,6 +16,39 @@ use Illuminate\Validation\Rule;
  */
 class TenantController extends Controller
 {
+    /**
+     * Reserved slugs — tenant ID sifatida ishlatib bo'lmaydigan subdomainlar.
+     *
+     * Bular infrastruktura, xizmat yoki kelajakda ishlatilishi mumkin bo'lgan
+     * subdomainlar. Tenant slug bu ro'yxatdan bo'lmasligi kerak.
+     */
+    private const RESERVED_SLUGS = [
+        // Infrastruktura
+        'admin', 'api', 'www', 'root',
+        'tenant', 'tenants',
+
+        // Umumiy texnik subdomainlar
+        'mail', 'smtp', 'imap', 'pop', 'ftp', 'ssh',
+        'cdn', 'static', 'assets', 'media', 'files',
+        'ns', 'ns1', 'ns2', 'dns',
+
+        // Xizmat/yordamchi
+        'app', 'dashboard', 'panel', 'portal',
+        'support', 'help', 'docs', 'blog', 'news',
+        'billing', 'payments', 'checkout',
+        'status', 'health', 'monitoring',
+
+        // Auth/account
+        'auth', 'login', 'signup', 'register', 'account', 'profile',
+
+        // Development/staging
+        'test', 'tests', 'staging', 'stage', 'dev', 'development',
+        'demo-internal', 'preview', 'beta', 'alpha',
+
+        // Reserved
+        'public', 'private', 'internal', 'secure', 'ssl',
+    ];
+
     public function __construct(protected TenantService $tenantService)
     {
     }
@@ -73,6 +106,7 @@ class TenantController extends Controller
                 'min:3',
                 'max:55',
                 'regex:/^[a-z][a-z0-9-]*[a-z0-9]$/',
+                Rule::notIn(self::RESERVED_SLUGS),
                 Rule::unique('tenants', 'id'),
             ],
 
@@ -90,6 +124,7 @@ class TenantController extends Controller
             'admin_password' => ['nullable', 'string', 'min:8', 'max:100'],
         ], [
             'slug.regex' => 'Subdomain faqat kichik harflar, raqamlar va defis (-) belgisidan iborat bo\'lishi mumkin. Harf bilan boshlanishi va harf/raqam bilan tugashi kerak.',
+            'slug.not_in' => 'Bu subdomain tizim tomonidan band qilingan (masalan: admin, api, www, tenants). Boshqasini tanlang.',
             'slug.unique' => 'Bu subdomain allaqachon band. Boshqasini tanlang.',
         ]);
 
