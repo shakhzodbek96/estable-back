@@ -28,6 +28,24 @@ return Application::configure(basePath: dirname(__DIR__))
             'tenant' => \App\Http\Middleware\InitializeTenancyByOriginHeader::class,
             'admin' => \App\Http\Middleware\EnsureAdminUser::class,
         ]);
+
+        /**
+         * Production'da Cloudflare (va ehtimol HestiaCP nginx) orqali
+         * proxy qilinadi. Shu tufayli X-Forwarded-* header'larga ishonish
+         * kerak — aks holda Laravel HTTPS'ni ko'rmaydi, redirect'lar HTTP
+         * bo'lib ketadi va $request->ip() proxy IP'ni qaytaradi.
+         *
+         * at: '*' — barcha proxy'larga ishonamiz (Cloudflare IP ranges keng).
+         * Xavfsizlik uchun UFW faqat Cloudflare IP'laridan ulanish qabul qiladi.
+         */
+        $middleware->trustProxies(
+            at: '*',
+            headers: Request::HEADER_X_FORWARDED_FOR
+                | Request::HEADER_X_FORWARDED_HOST
+                | Request::HEADER_X_FORWARDED_PORT
+                | Request::HEADER_X_FORWARDED_PROTO
+                | Request::HEADER_X_FORWARDED_AWS_ELB,
+        );
     })
     ->withExceptions(function (Exceptions $exceptions) {
         /**
