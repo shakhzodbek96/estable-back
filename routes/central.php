@@ -3,6 +3,7 @@
 use App\Http\Controllers\Central\AdminAuthController;
 use App\Http\Controllers\Central\AdminUserController;
 use App\Http\Controllers\Central\DashboardController;
+use App\Http\Controllers\Central\HealthController;
 use App\Http\Controllers\Central\TenantController;
 use Illuminate\Support\Facades\Route;
 
@@ -67,4 +68,11 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('admin-users', [AdminUserController::class, 'index']);
     Route::post('admin-users', [AdminUserController::class, 'store']);
     Route::delete('admin-users/{adminUser}', [AdminUserController::class, 'destroy']);
+
+    // Health check — queue va scheduler monitoring
+    Route::prefix('health')->group(function () {
+        Route::post('queue-test', [HealthController::class, 'dispatchQueueTest']);
+        Route::get('queue-status', [HealthController::class, 'queueStatus']);
+        Route::get('scheduler-status', [HealthController::class, 'schedulerStatus']);
+    });
 });

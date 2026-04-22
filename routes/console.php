@@ -45,6 +45,24 @@ Schedule::call(function () {
 
 
 // ======================================================================
+// Scheduler heartbeat — har daqiqada timestamp yozib turadi.
+// GET /api/central/health/scheduler-status endpoint shuni o'qib,
+// scheduler servisi ishlayotganligini tasdiqlaydi.
+// ======================================================================
+
+Schedule::call(function () {
+    \Illuminate\Support\Facades\Cache::put(
+        \App\Http\Controllers\Central\HealthController::SCHEDULER_CACHE_KEY,
+        [
+            'timestamp' => now()->toIso8601String(),
+            'unixtime' => now()->unix(),
+        ],
+        now()->addDay()
+    );
+})->name('health:scheduler-heartbeat')->everyMinute()->withoutOverlapping();
+
+
+// ======================================================================
 // MISOL 2: TENANT task (har tenant uchun alohida)
 // ----------------------------------------------------------------------
 // Har tenant DB'si ichida kunlik ma'lumot (example: stale cart cleanup)
