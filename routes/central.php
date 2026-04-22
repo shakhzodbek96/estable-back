@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Route;
 | `personal_access_tokens` jadvalidan token'ni o'qiydi va `AdminUser`
 | modeliga bog'laydi.
 |
-| Base URL: /api/central/*
+| Base URL: ff*
 | Frontend:  admin.estable.uz (React + Vite + TypeScript + shadcn/ui)
 |
 */
