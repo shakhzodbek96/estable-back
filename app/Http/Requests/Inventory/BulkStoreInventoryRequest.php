@@ -17,6 +17,7 @@ class BulkStoreInventoryRequest extends FormRequest
             'product_id' => ['required', 'integer', 'exists:products,id'],
             'purchase_price' => ['required', 'numeric', 'min:0'],
             'selling_price' => ['required', 'numeric', 'min:0'],
+            'wholesale_price' => ['nullable', 'numeric', 'min:0'],
             'has_box' => ['sometimes', 'boolean'],
             'state' => ['sometimes', 'string', 'in:new,used'],
             'notes' => ['nullable', 'string'],

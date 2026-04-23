@@ -126,6 +126,7 @@ class SaleService
             'investor_id' => $sale->investor_id,
             'status' => SalePaymentStatus::New,
             'created_by' => auth()->id(),
+            'comment' => $payment['comment'] ?? null,
             'details' => $payment['details'] ?? [],
         ]);
     }

@@ -97,7 +97,7 @@ class InventoryController extends Controller
 
     public function update(UpdateInventoryRequest $request, Inventory $inventory): JsonResponse
     {
-        $inventory->update($request->validated());
+        $inventory = $this->inventoryService->updateItem($inventory, $request->validated());
         $inventory->load(['product:id,name', 'shop:id,name', 'investor:id,name']);
 
         return response()->json($inventory);

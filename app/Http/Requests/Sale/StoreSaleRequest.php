@@ -31,6 +31,22 @@ class StoreSaleRequest extends FormRequest
             'payments.*.amount' => ['required', 'numeric', 'min:0.01'],
             'payments.*.currency' => ['nullable', 'string', 'in:usd,uzs'],
             'payments.*.rate' => ['nullable', 'numeric', 'min:0'],
+            'payments.*.comment' => ['nullable', 'string', 'max:500'],
+
+            // P2P uchun qo'shimcha ma'lumotlar (audit uchun):
+            //   - card_last4: karta oxirgi 4 raqami
+            //   - time: to'lov vaqti (hh:mm)
+            'payments.*.details' => ['nullable', 'array'],
+            'payments.*.details.card_last4' => ['nullable', 'string', 'regex:/^\d{4}$/'],
+            'payments.*.details.time' => ['nullable', 'string', 'regex:/^\d{2}:\d{2}$/'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'payments.*.details.card_last4.regex' => 'Последние 4 цифры карты должны быть числом.',
+            'payments.*.details.time.regex' => 'Время должно быть в формате ЧЧ:ММ.',
         ];
     }
 }

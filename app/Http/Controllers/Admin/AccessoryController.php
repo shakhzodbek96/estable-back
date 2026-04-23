@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Accessory\BulkStoreAccessoryRequest;
 use App\Http\Requests\Accessory\RestockAccessoryRequest;
 use App\Http\Requests\Accessory\StoreAccessoryRequest;
 use App\Http\Requests\Accessory\UpdateAccessoryRequest;
@@ -54,6 +55,24 @@ class AccessoryController extends Controller
         return response()->json($accessory, 201);
     }
 
+    /**
+     * Bir nechta aksessuar partiyasini bitta so'rov bilan yaratish.
+     * Serial (IMEI) ga o'xshash UX: bir product + bir invoice + bir investor
+     * bo'yicha N ta barcode/quantity/narx partiyasi.
+     */
+    public function bulkStore(BulkStoreAccessoryRequest $request): JsonResponse
+    {
+        $accessories = $this->accessoryService->createBulkBatches($request->validated());
+
+        $ids = $accessories->pluck('id');
+        $loaded = Accessory::with(['product:id,name', 'shop:id,name'])->whereIn('id', $ids)->get();
+
+        return response()->json([
+            'message' => $loaded->count() . ' ta partiya yaratildi',
+            'data' => $loaded,
+        ], 201);
+    }
+
     public function show(Accessory $accessory): JsonResponse
     {
         $accessory->load([
@@ -69,7 +88,12 @@ class AccessoryController extends Controller
 
     public function update(UpdateAccessoryRequest $request, Accessory $accessory): JsonResponse
     {
-        $accessory->update($request->validated());
+        try {
+            $accessory = $this->accessoryService->updateItem($accessory, $request->validated());
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
         $accessory->load(['product:id,name', 'shop:id,name']);
 
         return response()->json($accessory);

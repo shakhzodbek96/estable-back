@@ -20,6 +20,7 @@ class StoreAccessoryRequest extends FormRequest
             'quantity' => ['required', 'integer', 'min:1'],
             'purchase_price' => ['required', 'numeric', 'min:0'],
             'sell_price' => ['required', 'numeric', 'min:0'],
+            'wholesale_price' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
             'shop_id' => ['required', 'integer', 'exists:shops,id'],
             'investor_id' => ['nullable', 'integer', 'exists:investors,id'],

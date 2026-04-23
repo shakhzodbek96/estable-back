@@ -28,6 +28,7 @@ class UpdateCustomerRequest extends FormRequest
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'phone' => ['sometimes', 'required', 'string', 'digits:9', Rule::unique('customers', 'phone')->ignore($customerId)],
+            'is_wholesale' => ['sometimes', 'boolean'],
             'notes' => ['nullable', 'string'],
         ];
     }

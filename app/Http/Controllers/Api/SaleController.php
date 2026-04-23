@@ -21,7 +21,17 @@ class SaleController extends Controller
     public function index(Request $request): JsonResponse
     {
         $query = Sale::select('id', 'customer_id', 'sale_date', 'total_price', 'payment_method', 'shop_id', 'sold_by', 'created_at')
-            ->with(['customer:id,name,phone', 'seller:id,name', 'shop:id,name'])
+            ->with([
+                'customer:id,name,phone,is_wholesale',
+                'seller:id,name',
+                'shop:id,name',
+                // Tovar nomlarini ro'yxat qatorida ko'rsatish uchun — 1 batch query'da yuklaydi
+                'items:id,sale_id,item_type,quantity,inventory_id,accessory_id',
+                'items.inventory:id,product_id,serial_number',
+                'items.inventory.product:id,name',
+                'items.accessory:id,product_id,barcode',
+                'items.accessory.product:id,name',
+            ])
             ->withCount('items');
 
         if ($dateFrom = $request->string('date_from')->trim()->value()) {

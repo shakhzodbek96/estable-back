@@ -26,6 +26,7 @@ class StoreCustomerRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'phone' => ['required', 'string', 'digits:9', 'unique:customers,phone'],
+            'is_wholesale' => ['sometimes', 'boolean'],
             'notes' => ['nullable', 'string'],
         ];
     }

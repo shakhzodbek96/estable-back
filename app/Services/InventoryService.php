@@ -33,6 +33,7 @@ class InventoryService
                     'purchase_price' => $data['purchase_price'],
                     'extra_cost' => $serialExtraCost,
                     'selling_price' => $data['selling_price'],
+                    'wholesale_price' => $data['wholesale_price'] ?? null,
                     'status' => InventoryStatus::InStock,
                     'has_box' => $data['has_box'] ?? true,
                     'state' => $data['state'] ?? 'new',
@@ -82,6 +83,69 @@ class InventoryService
 
             return $inventories;
         });
+    }
+
+    /**
+     * Inventory (serial) tovarni tahrirlash.
+     *
+     * Agar purchase_price yoki extra_cost o'zgarsa VA tovar investor mablag'i evaziga
+     * olingan bo'lsa — bog'liq Transaction, Investment va investor.balance avtomatik
+     * delta bilan to'g'rilab qo'yiladi.
+     *
+     * Hammasi bitta DB transaction ichida — yoki hammasi, yoki hech biri.
+     */
+    public function updateItem(Inventory $inventory, array $data): Inventory
+    {
+        return DB::transaction(function () use ($inventory, $data) {
+            $oldContribution = (float) $inventory->purchase_price + (float) $inventory->extra_cost;
+
+            $inventory->update($data);
+            $inventory->refresh();
+
+            $newContribution = (float) $inventory->purchase_price + (float) $inventory->extra_cost;
+            $delta = $newContribution - $oldContribution;
+
+            if ($inventory->investor_id && abs($delta) > 0.001) {
+                $this->cascadeInventoryPurchaseDelta($inventory, $delta);
+            }
+
+            return $inventory;
+        });
+    }
+
+    /**
+     * Inventory uchun purchase delta'ni tegishli Transaction/Investment/investor.balance'ga
+     * surib qo'yadi. Transaction — bitta batch bir nechta inventory yaratishi mumkin
+     * (details->inventory_ids massiv), shunda ham ishlaydi (amount to'liq summa).
+     */
+    private function cascadeInventoryPurchaseDelta(Inventory $inventory, float $delta): void
+    {
+        $transaction = Transaction::where('type', TransactionType::Purchase)
+            ->where('investor_id', $inventory->investor_id)
+            ->whereJsonContains('details->inventory_ids', $inventory->id)
+            ->first();
+
+        if (!$transaction) {
+            // Transaction topilmasa — cascade qilmaymiz. Investorga noto'g'ri balans
+            // tushmasligi uchun ishda ham xavfsiz.
+            return;
+        }
+
+        $transaction->amount = (float) $transaction->amount + $delta;
+        $transaction->save();
+
+        Investment::where('transaction_id', $transaction->id)
+            ->get()
+            ->each(function (Investment $inv) use ($delta) {
+                $inv->amount = (float) $inv->amount + $delta;
+                $inv->save();
+            });
+
+        $investor = Investor::lockForUpdate()->find($inventory->investor_id);
+        if ($investor) {
+            $investor->balance = (float) $investor->balance - $delta;
+            $investor->save();
+        }
     }
 
     public function addRepairCost(Inventory $inventory, array $data): RepairCost

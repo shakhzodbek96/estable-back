@@ -80,7 +80,9 @@ Route::middleware('auth:sanctum')->group(function () {
 Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::get('sale-payments/pending', [SalePaymentController::class, 'pending']);
     Route::post('sale-payments/bulk-accept', [SalePaymentController::class, 'bulkAccept']);
+    Route::post('sale-payments/bulk-accept-sale', [SalePaymentController::class, 'bulkAcceptSale']);
     Route::get('sale-payments/{salePayment}', [SalePaymentController::class, 'show']);
+    Route::put('sale-payments/{salePayment}', [SalePaymentController::class, 'update']);
     Route::post('sale-payments/{salePayment}/accept', [SalePaymentController::class, 'accept']);
     Route::post('sale-payments/{salePayment}/reject', [SalePaymentController::class, 'reject']);
     Route::get('sellers/{user}/cash-summary', [SalePaymentController::class, 'cashSummary']);
@@ -159,6 +161,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
 
     // Accessories
     Route::get('accessories/search', [AccessoryController::class, 'search']);
+    Route::post('accessories/bulk', [AccessoryController::class, 'bulkStore']);
     Route::post('accessories/{accessory}/restock', [AccessoryController::class, 'restock']);
     Route::apiResource('accessories', AccessoryController::class);
 });

@@ -14,8 +14,16 @@ class Customer extends Model
         'name',
         'phone',
         'chat_id',
+        'is_wholesale',
         'notes',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'is_wholesale' => 'boolean',
+        ];
+    }
 
     public function sales(): HasMany
     {

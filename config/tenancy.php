@@ -18,6 +18,18 @@ return [
     'domain_model' => Domain::class,
 
     /**
+     * Tenant domain suffix — yangi tenant yaratilganda `{slug}.{suffix}` formatda
+     * default domen saqlanadi.
+     *
+     *   Production:  "estable.uz"       → demo.estable.uz
+     *   Lokal dev:   "estable.localhost" → demo.estable.localhost
+     *                                     (*.localhost brauzerda avtomatik 127.0.0.1)
+     *
+     * `.env` orqali sozlanadi: TENANT_DOMAIN_SUFFIX=estable.localhost
+     */
+    'tenant_domain_suffix' => env('TENANT_DOMAIN_SUFFIX', 'estable.uz'),
+
+    /**
      * The list of domains hosting your central app.
      *
      * Biz bu ro'yxatni faqat `central.stack` middleware bilan ishlatamiz.
@@ -25,8 +37,15 @@ return [
      * shuning uchun subdomain/domain middleware'si ishlamaydi.
      */
     'central_domains' => [
+        // Production
         'api.estable.uz',
         'admin.estable.uz',
+
+        // Lokal dev — *.localhost brauzer avtomatik 127.0.0.1 ga resolve qiladi
+        'api.estable.localhost',
+        'admin.estable.localhost',
+
+        // Legacy lokal
         'localhost',
         '127.0.0.1',
         'localhost:8000',

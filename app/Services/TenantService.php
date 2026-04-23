@@ -67,9 +67,20 @@ class TenantService
 
             $tenant = Tenant::create($attributes);
 
-            // Default subdomain
-            $defaultDomain = $tenant->id . '.estable.uz';
-            $tenant->domains()->create(['domain' => $defaultDomain]);
+            // Default subdomain — domain suffix config/env dan olinadi
+            // (production: "estable.uz", lokal: "estable.localhost")
+            $suffix = config('tenancy.tenant_domain_suffix', 'estable.uz');
+            $tenant->domains()->create(['domain' => $tenant->id . '.' . $suffix]);
+
+            // Lokal dev: ikkala variantni ham saqlaymiz shunda dev mashinada
+            // .estable.uz (dnsmasq bilan) va .estable.localhost (default) ham ishlaydi.
+            // Production'da bu shart ishlamaydi.
+            if (app()->environment('local')) {
+                foreach (['estable.uz', 'estable.localhost'] as $devSuffix) {
+                    $devDomain = $tenant->id . '.' . $devSuffix;
+                    $tenant->domains()->firstOrCreate(['domain' => $devDomain]);
+                }
+            }
 
             // Custom domain (ixtiyoriy)
             if (!empty($data['custom_domain'])) {

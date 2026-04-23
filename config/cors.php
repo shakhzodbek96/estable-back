@@ -35,13 +35,17 @@ return [
     ],
 
     /**
-     * Wildcard patterns — production tenant subdomainlari.
-     * Regex format: slashlar bilan yoki bo'ronlar bilan.
-     * Bu pattern '*.estable.uz' ga mos keladi (http yoki https).
-     * (:\d+)? — ixtiyoriy port, local dev uchun: shop1.estable.uz:5173
+     * Wildcard patterns — production va lokal dev tenant subdomainlari.
+     *
+     * Mos keladigan origin'lar:
+     *   Production:  https://demo.estable.uz, https://admin.estable.uz
+     *   Lokal dev:   http://demo.estable.localhost:5173
+     *                http://admin.estable.localhost:5174
+     *
+     * (:\d+)? — ixtiyoriy port (lokal dev uchun 5173/5174)
      */
     'allowed_origins_patterns' => [
-        '#^https?://([a-z0-9-]+\.)*estable\.uz(:\d+)?$#i',
+        '#^https?://([a-z0-9-]+\.)*estable\.(uz|localhost)(:\d+)?$#i',
     ],
 
     'allowed_headers' => ['*'],

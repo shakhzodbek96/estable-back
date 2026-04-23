@@ -17,6 +17,7 @@ class Accessory extends Model
         'consigned_quantity',
         'purchase_price',
         'sell_price',
+        'wholesale_price',
         'notes',
         'consignment_item_id',
         'shop_id',
@@ -30,6 +31,7 @@ class Accessory extends Model
         return [
             'purchase_price' => 'decimal:2',
             'sell_price' => 'decimal:2',
+            'wholesale_price' => 'decimal:2',
             'is_active' => 'boolean',
         ];
     }
