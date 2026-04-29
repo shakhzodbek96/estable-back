@@ -74,20 +74,24 @@ class ProductImportService
 
         foreach ($toCreate as $name) {
             try {
-                Product::create([
-                    'category_id' => $categoryId,
-                    'type' => $type,
-                    'name' => $name,
-                ]);
-                $createdCount++;
-            } catch (\Illuminate\Database\QueryException $e) {
-                // PostgreSQL "23505" yoki MySQL "1062" — duplicate key violation.
-                // Race condition (boshqa user bir vaqtda kiritgan) yoki orphan unique index.
-                if (
-                    $e->getCode() === '23505'
-                    || str_contains($e->getMessage(), 'Duplicate entry')
-                    || str_contains($e->getMessage(), 'duplicate key')
-                ) {
+                // ★ firstOrCreate withTrashed — idempotent SELECT+INSERT.
+                // Race-safe: agar concurrent request bir vaqtda yaratsa, xato unique violation
+                // chiqarib, biz catch'da uni mavjud sifatida hisoblaymiz.
+                $product = Product::withTrashed()->firstOrCreate(
+                    ['name' => $name],
+                    ['category_id' => $categoryId, 'type' => $type]
+                );
+                if ($product->trashed()) {
+                    $product->restore();
+                    $raceSkipped->push($name);
+                } elseif ($product->wasRecentlyCreated) {
+                    $createdCount++;
+                } else {
+                    // Allaqachon mavjud — skipped sifatida hisobga olamiz
+                    $raceSkipped->push($name);
+                }
+            } catch (\Throwable $e) {
+                if (self::isUniqueViolation($e)) {
                     $raceSkipped->push($name);
                     continue;
                 }
@@ -102,6 +106,25 @@ class ProductImportService
             'skipped_count' => $allSkipped->count(),
             'skipped_names' => $allSkipped->take(20)->values()->all(),
         ];
+    }
+
+    /**
+     * DB unique constraint violation aniqlash (Laravel/DB versiyasiga qaramasdan).
+     */
+    public static function isUniqueViolation(\Throwable $e): bool
+    {
+        if (class_exists(\Illuminate\Database\UniqueConstraintViolationException::class)
+            && $e instanceof \Illuminate\Database\UniqueConstraintViolationException) {
+            return true;
+        }
+        if ($e instanceof \Illuminate\Database\QueryException) {
+            $code = (string) $e->getCode();
+            if ($code === '23505' || $code === '1062') return true;
+            $msg = $e->getMessage();
+            if (str_contains($msg, 'duplicate key') || str_contains($msg, 'Duplicate entry')) return true;
+            if (str_contains($msg, '23505') || str_contains($msg, 'Unique violation')) return true;
+        }
+        return false;
     }
 
     /**

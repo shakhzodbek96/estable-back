@@ -103,18 +103,20 @@ class ProductController extends Controller
 
         foreach ($toCreate as $name) {
             try {
-                $product = Product::create([
-                    'category_id' => $data['category_id'] ?? null,
-                    'type' => $data['type'],
-                    'name' => $name,
-                ]);
-                $created->push($product);
-            } catch (\Illuminate\Database\QueryException $e) {
-                if (
-                    $e->getCode() === '23505'
-                    || str_contains($e->getMessage(), 'Duplicate entry')
-                    || str_contains($e->getMessage(), 'duplicate key')
-                ) {
+                $product = Product::withTrashed()->firstOrCreate(
+                    ['name' => $name],
+                    ['category_id' => $data['category_id'] ?? null, 'type' => $data['type']]
+                );
+                if ($product->trashed()) {
+                    $product->restore();
+                    $raceSkipped->push($name);
+                } elseif ($product->wasRecentlyCreated) {
+                    $created->push($product);
+                } else {
+                    $raceSkipped->push($name);
+                }
+            } catch (\Throwable $e) {
+                if (\App\Services\ProductImportService::isUniqueViolation($e)) {
                     $raceSkipped->push($name);
                     continue;
                 }

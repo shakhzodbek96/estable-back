@@ -205,22 +205,26 @@ class InventoryController extends Controller
                     'unknown_products' => $missingNames->take(50)->values(),
                 ], 422);
             }
-            // Auto-create — type=serial, kategoriya null. Race-safe: QueryException catch
+            // Auto-create — type=serial, kategoriya null. Bulletproof:
+            //   1. firstOrCreate withTrashed — atomically idempotent
+            //   2. Restore agar soft-deleted edi
+            //   3. catch — UniqueConstraintViolationException + QueryException SQLSTATE 23505
+            //      (Laravel versiyasi qarab har xil class chiqishi mumkin)
             foreach ($missingNames as $name) {
                 try {
-                    $product = \App\Models\Product::create([
-                        'category_id' => null,
-                        'type' => 'serial',
-                        'name' => $name,
-                    ]);
+                    $product = \App\Models\Product::withTrashed()->firstOrCreate(
+                        ['name' => $name],
+                        ['category_id' => null, 'type' => 'serial']
+                    );
+                    if ($product->trashed()) {
+                        $product->restore();
+                    }
+                    if ($product->wasRecentlyCreated) {
+                        $createdProducts->push($product->name);
+                    }
                     $existingProducts->put($name, $product);
-                    $createdProducts->push($product->name);
-                } catch (\Illuminate\Database\QueryException $e) {
-                    if (
-                        $e->getCode() === '23505'
-                        || str_contains($e->getMessage(), 'Duplicate entry')
-                        || str_contains($e->getMessage(), 'duplicate key')
-                    ) {
+                } catch (\Throwable $e) {
+                    if (\App\Services\ProductImportService::isUniqueViolation($e)) {
                         // Race condition — boshqa user bir vaqtda yaratdi.
                         // Qaytadan o'qib, mavjud product'ni olib qo'yamiz.
                         $existingProduct = \App\Models\Product::withTrashed()->where('name', $name)->first();
