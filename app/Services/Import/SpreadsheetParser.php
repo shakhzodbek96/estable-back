@@ -39,8 +39,13 @@ class SpreadsheetParser
     /**
      * Yacheyka qiymatini tozalash:
      *   - control belgilarni olib tashlash
+     *   - Unicode whitespace (NBSP, zero-width, ideographic, etc.) tozalash
      *   - bo'shliq va qo'shtirnoqlarni trim qilish
+     *   - ichki ko'p bo'shliqlarni bittaga qisqartirish
      *   - CSV injection oldi (= + - @ bilan boshlanishlar zararsizlantiriladi)
+     *
+     * Bu agressiv normalizatsiya import vaqtidagi byte-darajasidagi nomuvofiqlik
+     * (Excel'dan keladigan NBSP, BOM, zero-width belgilarni) oldini oladi.
      */
     public function sanitizeCell(?string $value): string
     {
@@ -48,9 +53,24 @@ class SpreadsheetParser
             return '';
         }
 
+        // 1) Control belgilarni olib tashlash
         $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $value) ?? '';
-        $value = trim($value, " \t\"'");
 
+        // 2) Zero-width va ko'rinmaydigan Unicode belgilarni olib tashlash
+        //    U+200B–U+200F (zero-width), U+202A–U+202E (BIDI), U+2060–U+2064, U+FEFF (BOM)
+        $value = preg_replace('/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2064}\x{FEFF}]/u', '', $value) ?? '';
+
+        // 3) Unicode whitespace (NBSP U+00A0, en-space U+2002, ideographic U+3000, etc.)
+        //    bularni regular space'ga aylantirish
+        $value = preg_replace('/[\x{00A0}\x{1680}\x{2000}-\x{200A}\x{202F}\x{205F}\x{3000}]/u', ' ', $value) ?? '';
+
+        // 4) Trim regular whitespace + qo'shtirnoqlar
+        $value = trim($value, " \t\n\r\"'");
+
+        // 5) Ichki ko'p bo'shliqlarni bittaga qisqartirish
+        $value = preg_replace('/\s+/u', ' ', $value) ?? '';
+
+        // 6) CSV injection — Excel formula prefix
         if (preg_match('/^[=+\-@\t\r]/', $value)) {
             $value = ltrim($value, "=+-@\t\r");
         }

@@ -239,9 +239,14 @@ class InventoryController extends Controller
             }
         }
 
-        // 3. Rich payload yig'ish
-        $richRows = $rowsAfterImei->map(function ($r) use ($existingProducts) {
+        // 3. Rich payload yig'ish — har qator product_id'ga ega bo'lishini KAFOLATLAYMIZ
+        $unresolvedNames = collect();
+        $richRows = $rowsAfterImei->map(function ($r) use ($existingProducts, $unresolvedNames) {
             $product = $existingProducts->get($r['product_name']);
+            if (!$product || !$product->id) {
+                $unresolvedNames->push($r['product_name']);
+                return null;
+            }
             return [
                 'product_id' => $product->id,
                 'serial_number' => $r['imei'],
@@ -253,7 +258,22 @@ class InventoryController extends Controller
                 'has_box' => $r['has_box'],
                 'notes' => $r['note'],
             ];
-        })->values();
+        })->filter()->values();
+
+        // ★ FAIL-FAST: agar bironta tovar resolve bo'lmasa, hech narsa saqlanmasin
+        // (createRichBatch transaction'i qisman ma'lumotni qoldirmasligi uchun)
+        if ($unresolvedNames->isNotEmpty()) {
+            return response()->json([
+                'message' => 'Не удалось привязать товары. Некоторые названия не найдены и не созданы. Ничего не сохранено.',
+                'unresolved_products' => $unresolvedNames->unique()->take(50)->values(),
+            ], 500);
+        }
+
+        if ($richRows->isEmpty()) {
+            return response()->json([
+                'message' => 'После обработки не осталось строк для импорта.',
+            ], 422);
+        }
 
         // 4. Yana bir bor IMEI uniqueness tekshiruvi (race condition)
         $validator = Validator::make(['rows' => $richRows->all()], [
