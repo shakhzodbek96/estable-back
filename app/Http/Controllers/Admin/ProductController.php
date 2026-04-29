@@ -70,7 +70,10 @@ class ProductController extends Controller
      * Bir vaqtning o'zida bir nechta mahsulot yaratish.
      * Body: { category_id?, type, names: ["Item 1", "Item 2"] }
      *
-     * Mavjud nomlar avtomatik o'tkazib yuboriladi (duplicate-safe).
+     * Dublikat tekshiruv:
+     *   - Massiv ichidagi takrorlanishlar (->unique())
+     *   - DB'da active + soft-deleted (withTrashed)
+     *   - Race condition — try/catch QueryException 23505
      */
     public function bulkStore(Request $request): JsonResponse
     {
@@ -87,22 +90,46 @@ class ProductController extends Controller
             ->unique()
             ->values();
 
-        $existing = Product::whereIn('name', $names->all())->pluck('name')->values();
+        // ★ withTrashed() — soft-deleted ham hisobga
+        $existing = Product::withTrashed()
+            ->whereIn('name', $names->all())
+            ->pluck('name')
+            ->values();
+
         $toCreate = $names->diff($existing)->values();
 
-        $created = $toCreate->map(fn ($name) => Product::create([
-            'category_id' => $data['category_id'] ?? null,
-            'type' => $data['type'],
-            'name' => $name,
-        ]));
+        $created = collect();
+        $raceSkipped = collect();
+
+        foreach ($toCreate as $name) {
+            try {
+                $product = Product::create([
+                    'category_id' => $data['category_id'] ?? null,
+                    'type' => $data['type'],
+                    'name' => $name,
+                ]);
+                $created->push($product);
+            } catch (\Illuminate\Database\QueryException $e) {
+                if (
+                    $e->getCode() === '23505'
+                    || str_contains($e->getMessage(), 'Duplicate entry')
+                    || str_contains($e->getMessage(), 'duplicate key')
+                ) {
+                    $raceSkipped->push($name);
+                    continue;
+                }
+                throw $e;
+            }
+        }
 
         $created->each->load('category:id,name');
+        $allSkipped = $existing->merge($raceSkipped);
 
         return response()->json([
             'created' => $created,
             'count' => $created->count(),
-            'skipped_count' => $existing->count(),
-            'skipped_names' => $existing->take(20)->values(),
+            'skipped_count' => $allSkipped->count(),
+            'skipped_names' => $allSkipped->take(20)->values(),
         ], 201);
     }
 

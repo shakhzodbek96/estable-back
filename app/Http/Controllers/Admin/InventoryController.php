@@ -179,12 +179,20 @@ class InventoryController extends Controller
             ], 200);
         }
 
-        // 2. Tovar nomlarini tizimda tekshirish
+        // 2. Tovar nomlarini tizimda tekshirish — withTrashed soft-deleted'larni ham qo'shadi
         $productNames = $rowsAfterImei->pluck('product_name')->unique()->values();
-        $existingProducts = \App\Models\Product::whereIn('name', $productNames->all())
-            ->select('id', 'name', 'type')
+        $existingProducts = \App\Models\Product::withTrashed()
+            ->whereIn('name', $productNames->all())
+            ->select('id', 'name', 'type', 'deleted_at')
             ->get()
             ->keyBy('name');
+
+        // Soft-deleted bo'lgan tovarlar avval restore qilinadi (yangidan yaratish bo'lmaydi)
+        $existingProducts->each(function ($p) {
+            if ($p->deleted_at !== null) {
+                $p->restore();
+            }
+        });
 
         $missingNames = $productNames->reject(fn ($name) => $existingProducts->has($name))->values();
         $autoCreate = (bool) ($data['auto_create_products'] ?? false);
@@ -197,15 +205,33 @@ class InventoryController extends Controller
                     'unknown_products' => $missingNames->take(50)->values(),
                 ], 422);
             }
-            // Auto-create — type=serial, kategoriya null
+            // Auto-create — type=serial, kategoriya null. Race-safe: QueryException catch
             foreach ($missingNames as $name) {
-                $product = \App\Models\Product::create([
-                    'category_id' => null,
-                    'type' => 'serial',
-                    'name' => $name,
-                ]);
-                $existingProducts->put($name, $product);
-                $createdProducts->push($product->name);
+                try {
+                    $product = \App\Models\Product::create([
+                        'category_id' => null,
+                        'type' => 'serial',
+                        'name' => $name,
+                    ]);
+                    $existingProducts->put($name, $product);
+                    $createdProducts->push($product->name);
+                } catch (\Illuminate\Database\QueryException $e) {
+                    if (
+                        $e->getCode() === '23505'
+                        || str_contains($e->getMessage(), 'Duplicate entry')
+                        || str_contains($e->getMessage(), 'duplicate key')
+                    ) {
+                        // Race condition — boshqa user bir vaqtda yaratdi.
+                        // Qaytadan o'qib, mavjud product'ni olib qo'yamiz.
+                        $existingProduct = \App\Models\Product::withTrashed()->where('name', $name)->first();
+                        if ($existingProduct) {
+                            if ($existingProduct->trashed()) $existingProduct->restore();
+                            $existingProducts->put($name, $existingProduct);
+                        }
+                        continue;
+                    }
+                    throw $e;
+                }
             }
         }
 
