@@ -146,6 +146,8 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::apiResource('shops', ShopController::class);
     Route::apiResource('categories', CategoryController::class);
     Route::post('products/bulk', [ProductController::class, 'bulkStore']);
+    Route::post('products/import', [ProductController::class, 'import']);
+    Route::get('products/import-template', [ProductController::class, 'importTemplate']);
     Route::apiResource('products', ProductController::class);
     Route::apiResource('investors', InvestorController::class);
     Route::apiResource('partners', PartnerController::class);
@@ -155,6 +157,8 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::get('inventories/search', [InventoryController::class, 'search']);
     Route::get('inventories/by-status/{status}', [InventoryController::class, 'byStatus']);
     Route::post('inventories/bulk', [InventoryController::class, 'bulkStore']);
+    Route::post('inventories/import', [InventoryController::class, 'import']);
+    Route::get('inventories/import-template', [InventoryController::class, 'importTemplate']);
     Route::apiResource('inventories', InventoryController::class);
     Route::get('inventories/{inventory}/repair-costs', [RepairCostController::class, 'index']);
     Route::post('inventories/{inventory}/repair-costs', [RepairCostController::class, 'store']);
@@ -162,6 +166,8 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // Accessories
     Route::get('accessories/search', [AccessoryController::class, 'search']);
     Route::post('accessories/bulk', [AccessoryController::class, 'bulkStore']);
+    Route::post('accessories/import', [AccessoryController::class, 'import']);
+    Route::get('accessories/import-template', [AccessoryController::class, 'importTemplate']);
     Route::post('accessories/{accessory}/restock', [AccessoryController::class, 'restock']);
     Route::apiResource('accessories', AccessoryController::class);
 });

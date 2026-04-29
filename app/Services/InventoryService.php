@@ -148,6 +148,86 @@ class InventoryService
         }
     }
 
+    /**
+     * Rich import — har qatorda alohida tovar/narx/holat bo'ladigan import.
+     *
+     * Shared maydonlar: shop_id, investor_id (ixtiyoriy)
+     * Per-row: product_id, purchase_price, selling_price, wholesale_price?, state, has_box, serial_number, extra_serial_number?, notes?
+     *
+     * Investor biriktirilgan bo'lsa — barcha qatorlar summasi bitta Transaction + Investment yozuviga
+     * birlashtiriladi (alohida ko'p yozuv emas, audit toza qoladi).
+     *
+     * Hammasi DB::transaction ichida — yoki barchasi, yoki hech biri.
+     *
+     * @return Collection<int, Inventory>
+     */
+    public function createRichBatch(array $data): Collection
+    {
+        return DB::transaction(function () use ($data) {
+            $inventories = collect();
+            $totalCost = 0.0;
+
+            foreach ($data['rows'] as $row) {
+                $inv = Inventory::create([
+                    'product_id' => $row['product_id'],
+                    'serial_number' => $row['serial_number'],
+                    'extra_serial_number' => $row['extra_serial_number'] ?? null,
+                    'purchase_price' => $row['purchase_price'],
+                    'extra_cost' => 0,
+                    'selling_price' => $row['selling_price'],
+                    'wholesale_price' => $row['wholesale_price'] ?? null,
+                    'status' => InventoryStatus::InStock,
+                    'has_box' => $row['has_box'] ?? true,
+                    'state' => $row['state'] ?? 'new',
+                    'notes' => $row['notes'] ?? null,
+                    'shop_id' => $data['shop_id'],
+                    'investor_id' => $data['investor_id'] ?? null,
+                    'created_by' => auth()->id(),
+                ]);
+                $inventories->push($inv);
+                $totalCost += (float) $row['purchase_price'];
+            }
+
+            if (!empty($data['investor_id']) && $totalCost > 0) {
+                $rate = Rate::current();
+
+                $transaction = Transaction::create([
+                    'amount' => $totalCost,
+                    'currency' => 'usd',
+                    'rate' => $rate?->rate ?? 0,
+                    'is_credit' => false,
+                    'type' => TransactionType::Purchase,
+                    'transaction_date' => now()->toDateString(),
+                    'details' => [
+                        'inventory_ids' => $inventories->pluck('id')->all(),
+                        'serial_count' => $inventories->count(),
+                        'source' => 'rich_import',
+                    ],
+                    'shop_id' => $data['shop_id'],
+                    'investor_id' => $data['investor_id'],
+                    'created_by' => auth()->id(),
+                    'accepted_by' => auth()->id(),
+                ]);
+
+                Investment::create([
+                    'investor_id' => $data['investor_id'],
+                    'transaction_id' => $transaction->id,
+                    'type' => InvestmentType::BuyingProduct,
+                    'is_credit' => false,
+                    'amount' => $totalCost,
+                    'rate' => $rate?->rate ?? 0,
+                    'comment' => "Импорт: {$inventories->count()} ед.",
+                    'created_by' => auth()->id(),
+                ]);
+
+                $investor = Investor::lockForUpdate()->find($data['investor_id']);
+                $investor->decrement('balance', $totalCost);
+            }
+
+            return $inventories;
+        });
+    }
+
     public function addRepairCost(Inventory $inventory, array $data): RepairCost
     {
         return DB::transaction(function () use ($inventory, $data) {

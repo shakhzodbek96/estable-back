@@ -16,7 +16,7 @@ class StoreProductRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
             'type' => ['required', new Enum(ProductType::class)],
             'name' => ['required', 'string', 'max:255', 'unique:products,name'],
         ];

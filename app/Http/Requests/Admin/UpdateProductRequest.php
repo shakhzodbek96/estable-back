@@ -19,7 +19,7 @@ class UpdateProductRequest extends FormRequest
         $productId = $this->route('product')?->id;
 
         return [
-            'category_id' => ['sometimes', 'required', 'integer', 'exists:categories,id'],
+            'category_id' => ['sometimes', 'nullable', 'integer', 'exists:categories,id'],
             'type' => ['sometimes', 'required', new Enum(ProductType::class)],
             'name' => [
                 'sometimes',
