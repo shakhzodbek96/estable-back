@@ -8,6 +8,20 @@ use App\Models\Shop;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 
+/**
+ * Yangi tenant yaratilganda chaqiriladi (TenantService::create dan).
+ *
+ * Faqat MAJBURIY infrastructure ma'lumotlari yaratiladi:
+ *   - Admin user (login uchun)
+ *   - Default shop (sotuvlar shu yerga biriktiriladi)
+ *   - Joriy valyuta kursi (UZS/USD)
+ *
+ * Default category va product'lar YO'Q — biznes ma'lumotlari foydalanuvchining
+ * o'zi tomonidan kiritiladi (UI orqali yoki XLSX import bilan). Bu yondashuv
+ * yangi tenantni "toza baza" bilan boshlash imkonini beradi.
+ *
+ * Demo/test ma'lumotlar uchun TestDataSeeder ishlatiladi (alohida chaqiriladi).
+ */
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
@@ -42,9 +56,7 @@ class DatabaseSeeder extends Seeder
             ]);
         }
 
-        $this->call([
-            CategorySeeder::class,
-            ProductSeeder::class,
-        ]);
+        // ★ Default category va product'lar olib tashlandi.
+        // Yangi tenant biznes ma'lumotlarini o'zi yaratadi.
     }
 }

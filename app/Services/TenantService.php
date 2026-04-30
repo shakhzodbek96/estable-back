@@ -30,7 +30,8 @@ class TenantService
      * Qadamlar (stancl avto-boshqaradi 1-bosqichda):
      *  1) Tenant jadval yozuvi yaratish  →  CREATE SCHEMA + tenant migrations
      *  2) Domain qo'shish
-     *  3) Tenant kontekstida DatabaseSeeder (admin user + default shop + rate + products)
+     *  3) Tenant kontekstida DatabaseSeeder (faqat admin user + default shop + valyuta kursi —
+     *     biznes ma'lumotlari foydalanuvchining o'zida)
      *  4) Admin parolini qayta yaratish (unique, birinchi login'da almashtirish talab qilinadi)
      *
      * DB::transaction ishlatilmaydi — stancl schema/migrate operatsiyalari bir nechta
