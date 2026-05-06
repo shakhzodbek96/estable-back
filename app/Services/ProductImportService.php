@@ -52,7 +52,7 @@ class ProductImportService
      *
      * Dublikat tekshiruv 3 qatlamda:
      *   1) Fayl ichidagi takrorlanishlar — extractNames() ->unique() bilan olib tashlangan
-     *   2) DB'da active va SOFT-DELETED tovarlar — withTrashed() bilan
+     *   2) DB'da mavjud tovarlar — whereIn() bilan
      *   3) Race condition — har create() try/catch + QueryException 23505 (duplicate key)
      *      orqali defensive skip
      *
@@ -60,10 +60,7 @@ class ProductImportService
      */
     public function persist(Collection $names, string $type, ?int $categoryId): array
     {
-        // ★ withTrashed() — soft-deleted tovarlarni ham topish
-        // (DB level'dagi unique constraint deleted_at NULL'ligiga qaramaydi)
-        $existing = Product::withTrashed()
-            ->whereIn('name', $names->all())
+        $existing = Product::whereIn('name', $names->all())
             ->pluck('name')
             ->values();
 
@@ -74,17 +71,14 @@ class ProductImportService
 
         foreach ($toCreate as $name) {
             try {
-                // ★ firstOrCreate withTrashed — idempotent SELECT+INSERT.
+                // ★ firstOrCreate — idempotent SELECT+INSERT.
                 // Race-safe: agar concurrent request bir vaqtda yaratsa, xato unique violation
                 // chiqarib, biz catch'da uni mavjud sifatida hisoblaymiz.
-                $product = Product::withTrashed()->firstOrCreate(
+                $product = Product::firstOrCreate(
                     ['name' => $name],
                     ['category_id' => $categoryId, 'type' => $type]
                 );
-                if ($product->trashed()) {
-                    $product->restore();
-                    $raceSkipped->push($name);
-                } elseif ($product->wasRecentlyCreated) {
+                if ($product->wasRecentlyCreated) {
                     $createdCount++;
                 } else {
                     // Allaqachon mavjud — skipped sifatida hisobga olamiz

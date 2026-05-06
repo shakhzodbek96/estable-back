@@ -61,6 +61,20 @@ class ProductController extends Controller
 
     public function destroy(Product $product): JsonResponse
     {
+        // SoftDeletes olib tashlangach, delete = HARD delete + cascade'ga sabab bo'ladi.
+        // Inventory yoki accessory'ga bog'langan tovarlarni o'chirishga ruxsat bermaymiz —
+        // aks holda foydalanuvchi tarixiy ma'lumotlarni bilmasdan yo'qotadi.
+        $invCount = $product->inventories()->count();
+        $accCount = $product->accessories()->count();
+
+        if ($invCount > 0 || $accCount > 0) {
+            return response()->json([
+                'message' => 'Невозможно удалить товар: есть связанные записи (склад или аксессуары). Сначала удалите их.',
+                'inventories_count' => $invCount,
+                'accessories_count' => $accCount,
+            ], 409);
+        }
+
         $product->delete();
 
         return response()->json(['message' => 'Deleted']);
@@ -72,7 +86,7 @@ class ProductController extends Controller
      *
      * Dublikat tekshiruv:
      *   - Massiv ichidagi takrorlanishlar (->unique())
-     *   - DB'da active + soft-deleted (withTrashed)
+     *   - DB'da mavjud nomlar (whereIn)
      *   - Race condition — try/catch QueryException 23505
      */
     public function bulkStore(Request $request): JsonResponse
@@ -90,9 +104,7 @@ class ProductController extends Controller
             ->unique()
             ->values();
 
-        // ★ withTrashed() — soft-deleted ham hisobga
-        $existing = Product::withTrashed()
-            ->whereIn('name', $names->all())
+        $existing = Product::whereIn('name', $names->all())
             ->pluck('name')
             ->values();
 
@@ -103,14 +115,11 @@ class ProductController extends Controller
 
         foreach ($toCreate as $name) {
             try {
-                $product = Product::withTrashed()->firstOrCreate(
+                $product = Product::firstOrCreate(
                     ['name' => $name],
                     ['category_id' => $data['category_id'] ?? null, 'type' => $data['type']]
                 );
-                if ($product->trashed()) {
-                    $product->restore();
-                    $raceSkipped->push($name);
-                } elseif ($product->wasRecentlyCreated) {
+                if ($product->wasRecentlyCreated) {
                     $created->push($product);
                 } else {
                     $raceSkipped->push($name);

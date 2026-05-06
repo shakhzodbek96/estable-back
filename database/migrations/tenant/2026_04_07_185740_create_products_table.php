@@ -16,7 +16,6 @@ return new class extends Migration
                 ->nullOnDelete();
             $table->string('type')->default('serial');
             $table->string('name')->unique();
-            $table->softDeletes();
             $table->timestamps();
         });
     }

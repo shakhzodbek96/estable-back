@@ -179,20 +179,12 @@ class InventoryController extends Controller
             ], 200);
         }
 
-        // 2. Tovar nomlarini tizimda tekshirish — withTrashed soft-deleted'larni ham qo'shadi
+        // 2. Tovar nomlarini tizimda tekshirish
         $productNames = $rowsAfterImei->pluck('product_name')->unique()->values();
-        $existingProducts = \App\Models\Product::withTrashed()
-            ->whereIn('name', $productNames->all())
-            ->select('id', 'name', 'type', 'deleted_at')
+        $existingProducts = \App\Models\Product::whereIn('name', $productNames->all())
+            ->select('id', 'name', 'type')
             ->get()
             ->keyBy('name');
-
-        // Soft-deleted bo'lgan tovarlar avval restore qilinadi (yangidan yaratish bo'lmaydi)
-        $existingProducts->each(function ($p) {
-            if ($p->deleted_at !== null) {
-                $p->restore();
-            }
-        });
 
         $missingNames = $productNames->reject(fn ($name) => $existingProducts->has($name))->values();
         $autoCreate = (bool) ($data['auto_create_products'] ?? false);
@@ -206,19 +198,15 @@ class InventoryController extends Controller
                 ], 422);
             }
             // Auto-create — type=serial, kategoriya null. Bulletproof:
-            //   1. firstOrCreate withTrashed — atomically idempotent
-            //   2. Restore agar soft-deleted edi
-            //   3. catch — UniqueConstraintViolationException + QueryException SQLSTATE 23505
+            //   1. firstOrCreate — atomically idempotent
+            //   2. catch — UniqueConstraintViolationException + QueryException SQLSTATE 23505
             //      (Laravel versiyasi qarab har xil class chiqishi mumkin)
             foreach ($missingNames as $name) {
                 try {
-                    $product = \App\Models\Product::withTrashed()->firstOrCreate(
+                    $product = \App\Models\Product::firstOrCreate(
                         ['name' => $name],
                         ['category_id' => null, 'type' => 'serial']
                     );
-                    if ($product->trashed()) {
-                        $product->restore();
-                    }
                     if ($product->wasRecentlyCreated) {
                         $createdProducts->push($product->name);
                     }
@@ -227,9 +215,8 @@ class InventoryController extends Controller
                     if (\App\Services\ProductImportService::isUniqueViolation($e)) {
                         // Race condition — boshqa user bir vaqtda yaratdi.
                         // Qaytadan o'qib, mavjud product'ni olib qo'yamiz.
-                        $existingProduct = \App\Models\Product::withTrashed()->where('name', $name)->first();
+                        $existingProduct = \App\Models\Product::where('name', $name)->first();
                         if ($existingProduct) {
-                            if ($existingProduct->trashed()) $existingProduct->restore();
                             $existingProducts->put($name, $existingProduct);
                         }
                         continue;
