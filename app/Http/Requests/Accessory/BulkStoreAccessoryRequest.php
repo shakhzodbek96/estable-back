@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Accessory;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * Bir nechta aksessuar partiyasini bitta so'rov bilan yaratish.
@@ -12,6 +13,11 @@ use Illuminate\Foundation\Http\FormRequest;
  *
  * Per-batch fields (har partiya uchun alohida):
  *   - barcode, quantity, purchase_price, sell_price, wholesale_price, notes
+ *
+ * Validatsiya:
+ *   - barcode'lar so'rov ichida unique (distinct)
+ *   - barcode shu do'kon doirasida (shop_id) bazada is_active=true bo'lib mavjud
+ *     emasligi tekshiriladi — bo'lsa, mavjud partiyani restock qilish kerak
  */
 class BulkStoreAccessoryRequest extends FormRequest
 {
@@ -22,6 +28,8 @@ class BulkStoreAccessoryRequest extends FormRequest
 
     public function rules(): array
     {
+        $shopId = $this->input('shop_id');
+
         return [
             // Shared
             'product_id' => ['required', 'integer', 'exists:products,id'],
@@ -31,7 +39,12 @@ class BulkStoreAccessoryRequest extends FormRequest
 
             // Batches array
             'batches' => ['required', 'array', 'min:1'],
-            'batches.*.barcode' => ['required', 'string', 'max:255', 'distinct'],
+            'batches.*.barcode' => [
+                'required', 'string', 'max:255', 'distinct',
+                Rule::unique('accessories', 'barcode')->where(function ($q) use ($shopId) {
+                    $q->where('shop_id', $shopId)->where('is_active', true);
+                }),
+            ],
             'batches.*.quantity' => ['required', 'integer', 'min:1'],
             'batches.*.purchase_price' => ['required', 'numeric', 'min:0'],
             'batches.*.sell_price' => ['required', 'numeric', 'min:0'],
@@ -44,6 +57,7 @@ class BulkStoreAccessoryRequest extends FormRequest
     {
         return [
             'batches.*.barcode.distinct' => 'Штрих-код :input дублируется в списке.',
+            'batches.*.barcode.unique'   => 'Штрих-код :input уже существует в этом магазине. Используйте «Пополнить» для существующей партии.',
         ];
     }
 }

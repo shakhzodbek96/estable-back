@@ -80,7 +80,7 @@ class InventoryController extends Controller
         $loaded = Inventory::with(['product:id,name', 'shop:id,name'])->whereIn('id', $ids)->get();
 
         return response()->json([
-            'message' => $loaded->count() . ' ta tovar yaratildi',
+            'message' => 'Создано товаров: ' . $loaded->count(),
             'data' => $loaded,
         ], 201);
     }

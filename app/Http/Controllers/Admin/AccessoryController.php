@@ -71,7 +71,7 @@ class AccessoryController extends Controller
         $loaded = Accessory::with(['product:id,name', 'shop:id,name'])->whereIn('id', $ids)->get();
 
         return response()->json([
-            'message' => $loaded->count() . ' ta partiya yaratildi',
+            'message' => 'Создано партий: ' . $loaded->count(),
             'data' => $loaded,
         ], 201);
     }
