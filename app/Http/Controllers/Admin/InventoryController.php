@@ -139,7 +139,6 @@ class InventoryController extends Controller
             ],
             'shop_id' => ['required', 'integer', 'exists:shops,id'],
             'investor_id' => ['nullable', 'integer', 'exists:investors,id'],
-            'auto_create_products' => ['sometimes', 'boolean'],
         ]);
 
         try {
@@ -187,17 +186,11 @@ class InventoryController extends Controller
             ->keyBy('name');
 
         $missingNames = $productNames->reject(fn ($name) => $existingProducts->has($name))->values();
-        $autoCreate = (bool) ($data['auto_create_products'] ?? false);
         $createdProducts = collect();
 
         if ($missingNames->isNotEmpty()) {
-            if (!$autoCreate) {
-                return response()->json([
-                    'message' => 'Не найдены товары в системе. Включите опцию автоматического создания или создайте их вручную.',
-                    'unknown_products' => $missingNames->take(50)->values(),
-                ], 422);
-            }
-            // Auto-create — type=serial, kategoriya null. Bulletproof:
+            // Yetishmayotgan tovarlar doim avtomatik yaratiladi — type=serial, kategoriya null.
+            // Bulletproof:
             //   1. firstOrCreate — atomically idempotent
             //   2. catch — UniqueConstraintViolationException + QueryException SQLSTATE 23505
             //      (Laravel versiyasi qarab har xil class chiqishi mumkin)

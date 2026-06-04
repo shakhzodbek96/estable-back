@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\QuickCustomerController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\SalePaymentController;
 use App\Http\Controllers\Api\SaleScanController;
+use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ReturnController;
 use App\Http\Controllers\Api\InventoryStatusController;
@@ -65,6 +66,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('customers', CustomerController::class);
     Route::post('customers/quick', [QuickCustomerController::class, 'store']);
     Route::get('rates/current', [RateController::class, 'current']);
+
+    // POS skidka limitlari (sotuvchi ham o'qiy oladi — narx chegarasini ko'rsatish uchun)
+    Route::get('settings/discount-limits', [SettingController::class, 'discountLimits']);
 
     // Sales
     Route::get('sales/search-products', [SaleScanController::class, 'searchProducts']);
@@ -152,6 +156,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::apiResource('investors', InvestorController::class);
     Route::apiResource('partners', PartnerController::class);
     Route::apiResource('rates', RateController::class)->only(['index', 'store']);
+
+    // POS skidka limitlari (faqat admin o'rnatadi)
+    Route::put('discount-limits', [SettingController::class, 'updateDiscountLimits']);
 
     // Inventories
     Route::get('inventories/search', [InventoryController::class, 'search']);

@@ -8,8 +8,10 @@ use App\Http\Requests\Accessory\RestockAccessoryRequest;
 use App\Http\Requests\Accessory\StoreAccessoryRequest;
 use App\Http\Requests\Accessory\UpdateAccessoryRequest;
 use App\Models\Accessory;
+use App\Models\Product;
 use App\Services\AccessoryImportService;
 use App\Services\AccessoryService;
+use App\Services\ProductImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
@@ -132,9 +134,12 @@ class AccessoryController extends Controller
     /**
      * Bulk aksessuar partiyalarini fayldan import qilish.
      *
+     * Har qator o'z tovariga (Наименование) bog'lanadi — tizimda yo'q bo'lsa
+     * type=bulk bilan avtomatik yaratiladi, keyin import bajariladi.
+     *
      * Form-data:
-     *   - file (XLSX/CSV/TXT, max 3 MB) — qatorlar: barcode, qty, purchase, sell, wholesale?, notes?
-     *   - product_id, shop_id, invoice_number, investor_id? — shared fields
+     *   - file (XLSX/CSV/TXT, max 3 MB) — qatorlar: name, barcode, qty, purchase, sell, wholesale?, notes?
+     *   - shop_id, invoice_number, investor_id? — umumiy fieldlar
      */
     public function import(Request $request, AccessoryImportService $importer): JsonResponse
     {
@@ -143,7 +148,6 @@ class AccessoryController extends Controller
                 'required', 'file', 'max:3072',
                 'mimetypes:text/plain,text/csv,application/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,application/zip',
             ],
-            'product_id' => ['required', 'integer', 'exists:products,id'],
             'shop_id' => ['required', 'integer', 'exists:shops,id'],
             'invoice_number' => ['required', 'string', 'max:255'],
             'investor_id' => ['nullable', 'integer', 'exists:investors,id'],
@@ -167,16 +171,67 @@ class AccessoryController extends Controller
 
         if ($batches->isEmpty()) {
             return response()->json([
-                'message' => 'Файл пуст или не содержит корректных партий.',
+                'message' => 'Файл пуст или не содержит корректных партий (нужны наименование и штрих-код).',
             ], 422);
         }
 
+        // Tovar nomlarini tizimda tekshirish, yetishmaganlarini avto-yaratish (type=bulk)
+        $productNames = $batches->pluck('product_name')->unique()->values();
+        $existingProducts = Product::whereIn('name', $productNames->all())
+            ->select('id', 'name')
+            ->get()
+            ->keyBy('name');
+
+        $missingNames = $productNames->reject(fn ($name) => $existingProducts->has($name))->values();
+        $createdProducts = collect();
+
+        foreach ($missingNames as $name) {
+            try {
+                $product = Product::firstOrCreate(
+                    ['name' => $name],
+                    ['category_id' => null, 'type' => 'bulk']
+                );
+                if ($product->wasRecentlyCreated) {
+                    $createdProducts->push($product->name);
+                }
+                $existingProducts->put($name, $product);
+            } catch (\Throwable $e) {
+                // Race condition — boshqa so'rov bir vaqtda yaratgan bo'lishi mumkin
+                if (ProductImportService::isUniqueViolation($e)) {
+                    $existing = Product::where('name', $name)->first();
+                    if ($existing) {
+                        $existingProducts->put($name, $existing);
+                    }
+                    continue;
+                }
+                throw $e;
+            }
+        }
+
+        // Har partiyaga product_id biriktirish — barchasi resolve bo'lishini kafolatlaymiz
+        $unresolved = collect();
+        $batchesWithProduct = $batches->map(function ($b) use ($existingProducts, $unresolved) {
+            $product = $existingProducts->get($b['product_name']);
+            if (!$product || !$product->id) {
+                $unresolved->push($b['product_name']);
+                return null;
+            }
+            return array_merge($b, ['product_id' => $product->id]);
+        })->filter()->values();
+
+        // FAIL-FAST: bironta tovar resolve bo'lmasa — hech narsa saqlanmaydi
+        if ($unresolved->isNotEmpty()) {
+            return response()->json([
+                'message' => 'Не удалось привязать товары к партиям. Ничего не сохранено.',
+                'unresolved_products' => $unresolved->unique()->take(50)->values(),
+            ], 500);
+        }
+
         $payload = [
-            'product_id' => $data['product_id'],
             'shop_id' => $data['shop_id'],
             'invoice_number' => $data['invoice_number'],
             'investor_id' => $data['investor_id'] ?? null,
-            'batches' => $batches->all(),
+            'batches' => $batchesWithProduct->all(),
         ];
 
         $created = $this->accessoryService->createBulkBatches($payload);
@@ -185,7 +240,7 @@ class AccessoryController extends Controller
             'total_lines' => $batches->count(),
             'created_count' => $created->count(),
             'skipped_count' => 0,
-            'skipped_names' => [],
+            'auto_created_products' => $createdProducts->take(20)->values(),
         ], 201);
     }
 

@@ -5,18 +5,31 @@ namespace App\Services;
 use App\Enums\InventoryStatus;
 use App\Enums\SalePaymentStatus;
 use App\Models\Accessory;
+use App\Models\Customer;
 use App\Models\Inventory;
 use App\Models\Rate;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\SalePayment;
+use App\Models\Setting;
 use Illuminate\Support\Facades\DB;
 
 class SaleService
 {
+    /** Mijoz optovikmi (narx chegarasini kontekstli hisoblash uchun) */
+    private bool $isWholesale = false;
+
+    /** POS skidka limitlari (foizda): ['serial' => ?, 'accessory' => ?] */
+    private array $discountLimits = ['serial' => null, 'accessory' => null];
+
     public function create(array $data): Sale
     {
         return DB::transaction(function () use ($data) {
+            // Narx chegarasi konteksti — mijoz turi va limit konfiguratsiyasi
+            $this->isWholesale = ! empty($data['customer_id'])
+                && (bool) (Customer::find($data['customer_id'])?->is_wholesale);
+            $this->discountLimits = $this->loadDiscountLimits();
+
             $sale = Sale::create([
                 'customer_id' => $data['customer_id'] ?? null,
                 'sale_date' => $data['sale_date'] ?? now()->toDateString(),
@@ -48,6 +61,11 @@ class SaleService
                 throw new \Exception("Tovar mavjud emas: {$inventory->serial_number}");
             }
 
+            $basePrice = $this->isWholesale && $inventory->wholesale_price !== null
+                ? (float) $inventory->wholesale_price
+                : (float) $inventory->selling_price;
+            $this->assertPriceWithinLimit('serial', $basePrice, (float) $item['unit_price']);
+
             $inventory->update([
                 'status' => InventoryStatus::Sold,
                 'sold_price' => $item['unit_price'],
@@ -78,6 +96,11 @@ class SaleService
         if (!$accessory->is_active) {
             throw new \Exception("Aksessuar partiyasi deaktivatsiya qilingan: {$accessory->barcode}");
         }
+
+        $basePrice = $this->isWholesale && $accessory->wholesale_price !== null
+            ? (float) $accessory->wholesale_price
+            : (float) $accessory->sell_price;
+        $this->assertPriceWithinLimit('accessory', $basePrice, (float) $item['unit_price']);
 
         $available = $accessory->quantity - $accessory->sold_quantity - $accessory->consigned_quantity;
         $quantity = $item['quantity'] ?? 1;
@@ -129,6 +152,54 @@ class SaleService
             'comment' => $payment['comment'] ?? null,
             'details' => $payment['details'] ?? [],
         ]);
+    }
+
+    /**
+     * Sotuvchi belgilangan skidka limitidan oshib ketmaganini tekshiradi.
+     * Limit null bo'lsa — cheklov yo'q. Narxni yuqoriga ko'tarish doim mumkin.
+     *
+     * @param 'serial'|'accessory' $type
+     */
+    private function assertPriceWithinLimit(string $type, float $basePrice, float $unitPrice): void
+    {
+        $limit = $this->discountLimits[$type] ?? null;
+        if ($limit === null || $basePrice <= 0) {
+            return;
+        }
+
+        $floor = $basePrice * (1 - $limit / 100);
+
+        // 1 sent tolerantlik (suzuvchi nuqta / yaxlitlash uchun)
+        if ($unitPrice < $floor - 0.01) {
+            $label = $type === 'serial' ? 'товара' : 'аксессуара';
+            throw new \Exception(sprintf(
+                'Цена %s ниже минимально допустимой. Скидка не более %s%%, минимум $%s.',
+                $label,
+                rtrim(rtrim(number_format($limit, 2, '.', ''), '0'), '.'),
+                number_format($floor, 2, '.', ''),
+            ));
+        }
+    }
+
+    /**
+     * @return array{serial: float|null, accessory: float|null}
+     */
+    private function loadDiscountLimits(): array
+    {
+        $payload = Setting::getValue(Setting::POS_DISCOUNT_LIMITS, []);
+        $payload = is_array($payload) ? $payload : [];
+
+        $clamp = static function ($v): ?float {
+            if ($v === null || $v === '') {
+                return null;
+            }
+            return max(0.0, min(100.0, (float) $v));
+        };
+
+        return [
+            'serial' => $clamp($payload['serial'] ?? null),
+            'accessory' => $clamp($payload['accessory'] ?? null),
+        ];
     }
 
     private function calculateTotal(array $items): float

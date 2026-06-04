@@ -33,7 +33,8 @@ class AccessoryService
 
             foreach ($data['batches'] as $batch) {
                 $accessory = Accessory::create([
-                    'product_id' => $data['product_id'],
+                    // Import — har partiyada o'z product_id; qo'lda bulk — umumiy product_id
+                    'product_id' => $batch['product_id'] ?? $data['product_id'],
                     'invoice_number' => $data['invoice_number'],
                     'barcode' => $batch['barcode'],
                     'quantity' => $batch['quantity'],
