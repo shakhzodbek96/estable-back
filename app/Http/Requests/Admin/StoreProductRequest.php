@@ -19,6 +19,7 @@ class StoreProductRequest extends FormRequest
             'category_id' => ['nullable', 'integer', 'exists:categories,id'],
             'type' => ['required', new Enum(ProductType::class)],
             'name' => ['required', 'string', 'max:255', 'unique:products,name'],
+            'min_stock' => ['nullable', 'integer', 'min:0', 'max:1000000'],
         ];
     }
 }

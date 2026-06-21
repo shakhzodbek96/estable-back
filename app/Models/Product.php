@@ -16,12 +16,14 @@ class Product extends Model
         'category_id',
         'type',
         'name',
+        'min_stock',
     ];
 
     protected function casts(): array
     {
         return [
             'type' => ProductType::class,
+            'min_stock' => 'integer',
         ];
     }
 

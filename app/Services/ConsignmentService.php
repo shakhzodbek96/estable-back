@@ -280,6 +280,43 @@ class ConsignmentService
     }
 
     /**
+     * Incoming tovar sotuvi BEKOR qilinganda/QAYTARILGANDA — handleIncomingItemSold'ning teskarisi.
+     * Sotuvda partner balansidan ayrilgan qarzni qaytaradi (+) va consignmentItem.sold_quantity'ni
+     * kamaytiradi. SaleService'dagi har bir item uchun xavfsiz chaqiriladi — konsignatsiya
+     * bo'lmasa early return. cancelSale / SaleController::destroy / ReturnService::approve'dan chaqiriladi.
+     *
+     * @param int|null $qty Qaytarilgan miqdor (bulk qisman qaytarish uchun). null => to'liq qator.
+     */
+    public function handleIncomingItemReturned(SaleItem $saleItem, ?int $qty = null): void
+    {
+        $consignmentItemId = null;
+
+        if ($saleItem->item_type->value === 'serial' && $saleItem->inventory?->consignment_item_id) {
+            $consignmentItemId = $saleItem->inventory->consignment_item_id;
+        } elseif ($saleItem->item_type->value === 'bulk' && $saleItem->accessory?->consignment_item_id) {
+            $consignmentItemId = $saleItem->accessory->consignment_item_id;
+        }
+
+        if (!$consignmentItemId) return;
+
+        $consignmentItem = ConsignmentItem::with('consignment.partner')->find($consignmentItemId);
+        if (!$consignmentItem) return;
+
+        $reverseQty = $saleItem->item_type->value === 'serial' ? 1 : (int) ($qty ?? $saleItem->quantity);
+        // sold_quantity'dan ortiq ayirmaymiz (idempotent/xavfsiz)
+        $reverseQty = (int) min($reverseQty, (int) $consignmentItem->sold_quantity);
+        if ($reverseQty < 1) return;
+
+        $consignmentItem->decrement('sold_quantity', $reverseQty);
+
+        // Partner balansi: sotuvda biz qarzdor bo'lgan edik (-), endi qaytaramiz (+)
+        $totalDebt = (float) $consignmentItem->agreed_price * $reverseQty;
+        $consignmentItem->consignment->partner->increment('balance', $totalDebt);
+
+        $this->updateConsignmentStatus($consignmentItem->consignment);
+    }
+
+    /**
      * Partnerga to'lov qilish
      */
     public function payToPartner(Partner $partner, float $amount, array $data): Transaction
@@ -316,8 +353,19 @@ class ConsignmentService
     public function returnItems(Consignment $consignment, array $items): Consignment
     {
         return DB::transaction(function () use ($consignment, $items) {
+            // Barcha item'larni 1 ta query bilan (eager-load bilan) olamiz — avval
+            // har item uchun alohida findOrFail + 2 ta eager-load (N×3 query) edi.
+            $loadedItems = ConsignmentItem::with(['inventory', 'accessory'])
+                ->whereIn('id', array_column($items, 'consignment_item_id'))
+                ->get()
+                ->keyBy('id');
+
             foreach ($items as $itemData) {
-                $consignmentItem = ConsignmentItem::with(['inventory', 'accessory'])->findOrFail($itemData['consignment_item_id']);
+                $consignmentItem = $loadedItems->get($itemData['consignment_item_id']);
+                if (! $consignmentItem) {
+                    throw (new \Illuminate\Database\Eloquent\ModelNotFoundException)
+                        ->setModel(ConsignmentItem::class, [$itemData['consignment_item_id']]);
+                }
                 $quantity = $itemData['quantity'] ?? 1;
 
                 if ($consignmentItem->sold_quantity + $consignmentItem->returned_quantity + $quantity > $consignmentItem->quantity) {
@@ -392,6 +440,10 @@ class ConsignmentService
             $consignment->update(['status' => ConsignmentStatus::Completed]);
         } elseif ($anyHandled) {
             $consignment->update(['status' => ConsignmentStatus::PartialReturned]);
+        } elseif ($consignment->status !== ConsignmentStatus::Cancelled) {
+            // Sotuv/qaytarish to'liq teskari hisoblangan bo'lsa — yana Active'ga qaytaramiz
+            // (bekor qilingan konsignatsiyani tiriltirmaymiz).
+            $consignment->update(['status' => ConsignmentStatus::Active]);
         }
     }
 }

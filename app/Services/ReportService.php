@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\InventoryStatus;
 use App\Enums\SalePaymentStatus;
 use App\Models\Accessory;
+use App\Models\Customer;
 use App\Models\Inventory;
 use App\Models\Investment;
 use App\Models\Investor;
@@ -12,6 +13,7 @@ use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\SalePayment;
 use App\Models\Transaction;
+use App\Services\SalePaymentService;
 use Illuminate\Support\Facades\DB;
 
 class ReportService
@@ -21,26 +23,29 @@ class ReportService
      */
     public function dashboard(array $filters): array
     {
-        $dateFrom = $filters['date_from'] ?? now()->startOfMonth()->toDateString();
+        // Standart davr — oxirgi 30 kun (bugun ham kiradi)
         $dateTo = $filters['date_to'] ?? now()->toDateString();
+        $dateFrom = $filters['date_from'] ?? now()->subDays(29)->toDateString();
         $shopId = $filters['shop_id'] ?? null;
+        $days = max(1, \Carbon\Carbon::parse($dateFrom)->diffInDays(\Carbon\Carbon::parse($dateTo)) + 1);
 
-        // Tasdiqlangan sotuvlar
-        $salesQuery = Sale::query()
-            ->whereBetween('sale_date', [$dateFrom, $dateTo])
-            ->whereHas('payments', fn($q) => $q->where('status', SalePaymentStatus::Accepted))
-            ->when($shopId, fn($q, $id) => $q->where('shop_id', $id));
+        // ---- Sotuv (joriy davr) ----
+        $cur = $this->salesAggregate($dateFrom, $dateTo, $shopId);
+        $saleIds = $cur['ids'];
 
-        $salesCount = (clone $salesQuery)->count();
-        $totalRevenue = (float) (clone $salesQuery)->sum('total_price');
+        // ---- Oldingi teng davr (taqqoslash) ----
+        $prevTo = \Carbon\Carbon::parse($dateFrom)->subDay()->toDateString();
+        $prevFrom = \Carbon\Carbon::parse($prevTo)->subDays($days - 1)->toDateString();
+        $prev = $this->salesAggregate($prevFrom, $prevTo, $shopId);
 
-        // Tannarx hisoblash
-        $saleIds = (clone $salesQuery)->pluck('id');
-        $totalCost = $this->calculateCost($saleIds);
-        $grossProfit = $totalRevenue - $totalCost;
+        $pct = static fn(float $now, float $old): ?float =>
+            $old > 0 ? round(($now - $old) / $old * 100, 1) : ($now > 0 ? null : 0.0);
 
-        // To'lov turlari bo'yicha
-        $byPaymentMethod = SalePayment::query()
+        // ---- Bugungi savdo ----
+        $today = $this->salesAggregate($dateTo, $dateTo, $shopId);
+
+        // ---- To'lov turlari bo'yicha (pie) ----
+        $byPaymentMethod = $saleIds->isEmpty() ? collect() : SalePayment::query()
             ->where('status', SalePaymentStatus::Accepted)
             ->whereIn('sale_id', $saleIds)
             ->selectRaw("type, SUM(CASE WHEN currency = 'usd' THEN amount ELSE amount / NULLIF(rate, 0) END) as total_usd")
@@ -48,45 +53,159 @@ class ReportService
             ->pluck('total_usd', 'type')
             ->map(fn($v) => round((float) $v, 2));
 
-        // Harajatlar
-        $expensesQuery = Transaction::query()
+        // ---- Harajatlar (operatsion; purchase/repair — COGS, chiqariladi) ----
+        $totalExpenses = (float) Transaction::query()
             ->where('is_credit', false)
+            ->whereNotIn('type', ['purchase', 'repair'])
             ->whereBetween('transaction_date', [$dateFrom, $dateTo])
+            ->when($shopId, fn($q, $id) => $q->where('shop_id', $id))
+            ->sum('amount');
+
+        // ---- Sklad qoldig'i (hozirgi holat) ----
+        $serialQuery = Inventory::query()->where('status', InventoryStatus::InStock)
             ->when($shopId, fn($q, $id) => $q->where('shop_id', $id));
+        // count + value — bitta query (avval ikkita alohida edi)
+        $serialAgg = (clone $serialQuery)
+            ->selectRaw('COUNT(*) as cnt, COALESCE(SUM(purchase_price + extra_cost), 0) as total')
+            ->first();
+        $serialCount = (int) $serialAgg->cnt;
+        $serialValue = (float) $serialAgg->total;
 
-        $totalExpenses = (float) (clone $expensesQuery)->sum('amount');
-
-        // Inventar qoldiq
-        $serialQuery = Inventory::query()
-            ->where('status', InventoryStatus::InStock)
+        $accessoryQuery = Accessory::query()->where('is_active', true)
             ->when($shopId, fn($q, $id) => $q->where('shop_id', $id));
+        // count + value — bitta query
+        $accAgg = (clone $accessoryQuery)
+            ->selectRaw('COALESCE(SUM(quantity - sold_quantity - consigned_quantity), 0) as cnt, COALESCE(SUM(purchase_price * (quantity - sold_quantity - consigned_quantity)), 0) as total')
+            ->first();
+        $accessoriesCount = (int) $accAgg->cnt;
+        $accessoriesValue = (float) $accAgg->total;
 
-        $serialCount = (clone $serialQuery)->count();
-        $serialValue = (float) (clone $serialQuery)->selectRaw('SUM(purchase_price + extra_cost) as total')->value('total') ?: 0;
-
-        $accessoryQuery = Accessory::query()
-            ->where('is_active', true)
+        // ---- Sotib olingan tovar (davr; created_at bo'yicha) ----
+        $window = [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59'];
+        $purSerialQ = Inventory::query()->whereBetween('created_at', $window)
             ->when($shopId, fn($q, $id) => $q->where('shop_id', $id));
+        $purSerialAgg = (clone $purSerialQ)
+            ->selectRaw('COUNT(*) as cnt, COALESCE(SUM(purchase_price + extra_cost), 0) as total')
+            ->first();
+        $purSerialCount = (int) $purSerialAgg->cnt;
+        $purSerialSum = (float) $purSerialAgg->total;
 
-        $accessoriesCount = (int) (clone $accessoryQuery)->selectRaw('SUM(quantity - sold_quantity - consigned_quantity) as total')->value('total') ?: 0;
-        $accessoriesValue = (float) (clone $accessoryQuery)->selectRaw('SUM(purchase_price * (quantity - sold_quantity - consigned_quantity)) as total')->value('total') ?: 0;
+        $purAccQ = Accessory::query()->whereBetween('created_at', $window)
+            ->when($shopId, fn($q, $id) => $q->where('shop_id', $id));
+        $purAccAgg = (clone $purAccQ)
+            ->selectRaw('COALESCE(SUM(quantity), 0) as cnt, COALESCE(SUM(purchase_price * quantity), 0) as total')
+            ->first();
+        $purAccCount = (int) $purAccAgg->cnt;
+        $purAccSum = (float) $purAccAgg->total;
 
-        // Tasdiqlanmagan to'lovlar
+        // ---- Eng foydali tovarlar (foyda bo'yicha top 5) ----
+        $topProfit = $saleIds->isEmpty() ? collect() : $this->topProductsQuery($saleIds, 'serial', 10)->get()
+            ->concat($this->topProductsQuery($saleIds, 'bulk', 10)->get())
+            ->sortByDesc(fn($r) => (float) $r->total_profit)
+            ->take(5)
+            ->values();
+
+        // ---- Kam qolgan tovarlar (mahsulot min_stock chegarasi bo'yicha) ----
+        // Aksessuar: barcha partiyalar qoldig'i yig'indisi; serial: in_stock dona soni.
+        $lowAcc = Accessory::query()
+            ->where('accessories.is_active', true)
+            ->when($shopId, fn($q, $id) => $q->where('accessories.shop_id', $id))
+            ->join('products', 'accessories.product_id', '=', 'products.id')
+            ->whereNotNull('products.min_stock')->where('products.min_stock', '>', 0)
+            ->groupBy('products.id', 'products.name', 'products.min_stock')
+            ->havingRaw('SUM(accessories.quantity - accessories.sold_quantity - accessories.consigned_quantity) <= products.min_stock')
+            ->selectRaw("products.name as product_name, 'bulk' as type, SUM(accessories.quantity - accessories.sold_quantity - accessories.consigned_quantity) as available, products.min_stock as min_stock")
+            ->get();
+
+        $lowSer = Inventory::query()
+            ->where('inventories.status', InventoryStatus::InStock)
+            ->when($shopId, fn($q, $id) => $q->where('inventories.shop_id', $id))
+            ->join('products', 'inventories.product_id', '=', 'products.id')
+            ->whereNotNull('products.min_stock')->where('products.min_stock', '>', 0)
+            ->groupBy('products.id', 'products.name', 'products.min_stock')
+            ->havingRaw('COUNT(*) <= products.min_stock')
+            ->selectRaw("products.name as product_name, 'serial' as type, COUNT(*) as available, products.min_stock as min_stock")
+            ->get();
+
+        $lowStock = $lowSer->concat($lowAcc)
+            ->sortBy(fn($r) => (int) $r->available)
+            ->take(10)
+            ->values();
+
+        // ---- Uzoq turib qolgan serial tovarlar (dead stock) ----
+        // 30/60/90 kun bucket'lari — bitta query (Postgres FILTER; avval 3×2=6 query edi)
+        $deadAgg = Inventory::query()->where('status', InventoryStatus::InStock)
+            ->when($shopId, fn($qq, $id) => $qq->where('shop_id', $id))
+            ->selectRaw(
+                'COUNT(*) FILTER (WHERE created_at <= ?) as c30, '
+                . 'COALESCE(SUM(purchase_price + extra_cost) FILTER (WHERE created_at <= ?), 0) as v30, '
+                . 'COUNT(*) FILTER (WHERE created_at <= ?) as c60, '
+                . 'COALESCE(SUM(purchase_price + extra_cost) FILTER (WHERE created_at <= ?), 0) as v60, '
+                . 'COUNT(*) FILTER (WHERE created_at <= ?) as c90, '
+                . 'COALESCE(SUM(purchase_price + extra_cost) FILTER (WHERE created_at <= ?), 0) as v90',
+                [
+                    now()->subDays(30), now()->subDays(30),
+                    now()->subDays(60), now()->subDays(60),
+                    now()->subDays(90), now()->subDays(90),
+                ]
+            )
+            ->first();
+        $deadBucket = fn (string $c, string $v) => [
+            'count' => (int) $deadAgg->{$c},
+            'value' => round((float) $deadAgg->{$v}, 2),
+        ];
+        $deadOldest = Inventory::query()->where('inventories.status', InventoryStatus::InStock)
+            ->where('inventories.created_at', '<=', now()->subDays(30))
+            ->when($shopId, fn($q, $id) => $q->where('inventories.shop_id', $id))
+            ->join('products', 'inventories.product_id', '=', 'products.id')
+            ->selectRaw('products.name as product_name, inventories.serial_number, inventories.created_at, (inventories.purchase_price + inventories.extra_cost) as cost')
+            ->orderBy('inventories.created_at', 'asc')
+            ->limit(5)
+            ->get()
+            ->map(fn($r) => [
+                'product_name' => $r->product_name,
+                'serial_number' => $r->serial_number,
+                'days' => (int) \Carbon\Carbon::parse($r->created_at)->diffInDays(now()),
+                'cost' => round((float) $r->cost, 2),
+            ]);
+
+        // ---- Kassa (davr; tasdiqlangan to'lovlar, usul × valyuta) ----
+        $kassa = app(SalePaymentService::class)->getKassaSummary([
+            'shop_id' => $shopId,
+            'date_from' => $dateFrom,
+            'date_to' => $dateTo,
+        ]);
+
+        // ---- Pul oqimi (davr; tranzaksiya ledjeri) ----
+        $inflow = (float) Transaction::query()->where('is_credit', true)
+            ->whereBetween('transaction_date', [$dateFrom, $dateTo])
+            ->when($shopId, fn($q, $id) => $q->where('shop_id', $id))->sum('amount');
+        $outflow = (float) Transaction::query()->where('is_credit', false)
+            ->whereBetween('transaction_date', [$dateFrom, $dateTo])
+            ->when($shopId, fn($q, $id) => $q->where('shop_id', $id))->sum('amount');
+
+        // ---- Tasdiqlanmagan to'lovlar (hozirgi) ----
         $pendingPayments = (float) SalePayment::query()
             ->where('status', SalePaymentStatus::New)
             ->when($shopId, fn($q, $id) => $q->where('shop_id', $id))
             ->selectRaw("SUM(CASE WHEN currency = 'usd' THEN amount ELSE amount / NULLIF(rate, 0) END) as total_usd")
             ->value('total_usd') ?: 0;
 
-        // Top 5 tovarlar
-        $topProducts = $this->topProductsQuery($saleIds, 'serial', 5)
-            ->union($this->topProductsQuery($saleIds, 'bulk', 5))
-            ->get()
-            ->sortByDesc('total_sold')
-            ->take(5)
-            ->values();
+        // ---- Investorlar xulosasi (hozirgi holat) ----
+        $invBalance = (float) Investor::sum('balance');
+        $invInGoodsSerial = (float) Inventory::query()->whereNotNull('investor_id')
+            ->where('status', InventoryStatus::InStock)
+            ->selectRaw('SUM(purchase_price + extra_cost) as total')->value('total') ?: 0;
+        $invInGoodsAcc = (float) Accessory::query()->whereNotNull('investor_id')
+            ->where('is_active', true)
+            ->selectRaw('SUM(purchase_price * (quantity - sold_quantity - consigned_quantity)) as total')->value('total') ?: 0;
+        $invInGoods = $invInGoodsSerial + $invInGoodsAcc;
+        $invInvested = (float) Investment::where('type', 1)->where('is_credit', true)->sum('amount');
 
-        // Oxirgi 10 sotuv
+        // ---- Yangi mijozlar (davr) ----
+        $newCustomers = (int) Customer::whereBetween('created_at', $window)->count();
+
+        // ---- Oxirgi 10 sotuv ----
         $recentSales = Sale::with(['customer:id,name', 'seller:id,name'])
             ->whereBetween('sale_date', [$dateFrom, $dateTo])
             ->when($shopId, fn($q, $id) => $q->where('shop_id', $id))
@@ -94,7 +213,7 @@ class ReportService
             ->limit(10)
             ->get(['id', 'customer_id', 'sold_by', 'sale_date', 'total_price', 'payment_method']);
 
-        // Kunlik sotuvlar (grafik uchun)
+        // ---- Kunlik sotuvlar (grafik) ----
         $dailySales = Sale::query()
             ->whereBetween('sale_date', [$dateFrom, $dateTo])
             ->whereHas('payments', fn($q) => $q->where('status', SalePaymentStatus::Accepted))
@@ -105,26 +224,94 @@ class ReportService
             ->get();
 
         return [
-            'period' => ['from' => $dateFrom, 'to' => $dateTo],
+            'period' => ['from' => $dateFrom, 'to' => $dateTo, 'days' => $days],
             'sales' => [
-                'count' => $salesCount,
-                'total_revenue' => round($totalRevenue, 2),
-                'total_cost' => round($totalCost, 2),
-                'gross_profit' => round($grossProfit, 2),
+                'count' => $cur['count'],
+                'total_revenue' => $cur['revenue'],
+                'total_cost' => $cur['cost'],
+                'gross_profit' => $cur['gross_profit'],
+                'avg_daily_revenue' => round($cur['revenue'] / $days, 2),
+                'avg_daily_profit' => round($cur['gross_profit'] / $days, 2),
                 'by_payment_method' => $byPaymentMethod,
             ],
+            'comparison' => [
+                'revenue_prev' => $prev['revenue'],
+                'revenue_pct' => $pct($cur['revenue'], $prev['revenue']),
+                'profit_prev' => $prev['gross_profit'],
+                'profit_pct' => $pct($cur['gross_profit'], $prev['gross_profit']),
+            ],
+            'today' => [
+                'count' => $today['count'],
+                'revenue' => $today['revenue'],
+                'profit' => $today['gross_profit'],
+            ],
             'expenses' => ['total' => round($totalExpenses, 2)],
-            'net_profit' => round($grossProfit - $totalExpenses, 2),
+            'net_profit' => round($cur['gross_profit'] - $totalExpenses, 2),
             'inventory' => [
                 'serial_count' => $serialCount,
                 'serial_value' => round($serialValue, 2),
                 'accessories_count' => $accessoriesCount,
                 'accessories_value' => round($accessoriesValue, 2),
+                'total_value' => round($serialValue + $accessoriesValue, 2),
+            ],
+            'purchases' => [
+                'serial_count' => $purSerialCount,
+                'serial_sum' => round($purSerialSum, 2),
+                'accessory_count' => $purAccCount,
+                'accessory_sum' => round($purAccSum, 2),
+                'total_sum' => round($purSerialSum + $purAccSum, 2),
+            ],
+            'top_profit' => $topProfit,
+            'low_stock' => $lowStock,
+            'dead_stock' => [
+                'over_30' => $deadBucket('c30', 'v30'),
+                'over_60' => $deadBucket('c60', 'v60'),
+                'over_90' => $deadBucket('c90', 'v90'),
+                'oldest' => $deadOldest,
+            ],
+            'cash' => $kassa['accepted'],
+            'cash_flow' => [
+                'inflow' => round($inflow, 2),
+                'outflow' => round($outflow, 2),
+                'net' => round($inflow - $outflow, 2),
             ],
             'pending_payments' => round($pendingPayments, 2),
-            'top_products' => $topProducts,
+            'investors' => [
+                'invested' => round($invInvested, 2),
+                'in_goods' => round($invInGoods, 2),
+                'accumulated_profit' => round($invBalance + $invInGoods - $invInvested, 2),
+                'balance' => round($invBalance, 2),
+            ],
+            'new_customers' => $newCustomers,
             'recent_sales' => $recentSales,
             'daily_sales' => $dailySales,
+        ];
+    }
+
+    /**
+     * Davr bo'yicha tasdiqlangan sotuv yig'masi: count, revenue, cost, gross_profit, ids.
+     */
+    private function salesAggregate(string $from, string $to, ?int $shopId): array
+    {
+        $q = Sale::query()
+            ->whereBetween('sale_date', [$from, $to])
+            ->whereHas('payments', fn($p) => $p->where('status', SalePaymentStatus::Accepted))
+            ->when($shopId, fn($qq, $id) => $qq->where('shop_id', $id));
+
+        // count + sum + ids — bitta query bilan (avval 3 ta alohida query edi,
+        // har biri qimmat whereHas('payments') subquery'sini takrorlardi).
+        $rows = (clone $q)->get(['id', 'total_price']);
+        $count = $rows->count();
+        $revenue = (float) $rows->sum(fn ($r) => (float) $r->total_price);
+        $ids = $rows->pluck('id');
+        $cost = $this->calculateCost($ids);
+
+        return [
+            'count' => $count,
+            'revenue' => round($revenue, 2),
+            'cost' => round($cost, 2),
+            'gross_profit' => round($revenue - $cost, 2),
+            'ids' => $ids,
         ];
     }
 
@@ -198,14 +385,18 @@ class ReportService
             ];
         }
 
-        // Harajatlar davr bo'yicha
+        // Harajatlar davr bo'yicha — purchase/repair CHIQARILADI (COGS, net_profit'da ikki marta sanalmasin)
+        // $dateExpr sale_date ustuni asosida qurilgan; transactions jadvalida ustun nomi transaction_date,
+        // shuning uchun select/group/order — barchasida almashtiramiz (faqat group/order'da emas).
+        $txnDateExpr = str_replace('sale_date', 'transaction_date', $dateExpr);
         $expenses = Transaction::query()
             ->where('is_credit', false)
+            ->whereNotIn('type', ['purchase', 'repair'])
             ->whereBetween('transaction_date', [$dateFrom, $dateTo])
             ->when($shopId, fn($q, $id) => $q->where('shop_id', $id))
-            ->selectRaw("{$dateExpr} as period, SUM(amount) as total")
-            ->groupByRaw(str_replace('sale_date', 'transaction_date', $dateExpr))
-            ->orderByRaw(str_replace('sale_date', 'transaction_date', $dateExpr))
+            ->selectRaw("{$txnDateExpr} as period, SUM(amount) as total")
+            ->groupByRaw($txnDateExpr)
+            ->orderByRaw($txnDateExpr)
             ->pluck('total', 'period')
             ->map(fn($v) => round((float) $v, 2));
 
@@ -428,7 +619,9 @@ class ReportService
 
         $investedAmount = $investments->where('type', 1)->where('is_credit', true)->sum('total');
         $dividends = $investments->where('type', 2)->where('is_credit', false)->sum('total');
-        $salesReceived = $investments->where('type', 3)->where('is_credit', true)->sum('total');
+        // type=3 (ClientsPayment): sotuv tushumi (is_credit=true) MINUS qaytarish/refund (is_credit=false)
+        $salesReceived = $investments->where('type', 3)->where('is_credit', true)->sum('total')
+            - $investments->where('type', 3)->where('is_credit', false)->sum('total');
         $buyingProduct = $investments->where('type', 4)->where('is_credit', false)->sum('total');
 
         // Investor tovarlaridan foyda

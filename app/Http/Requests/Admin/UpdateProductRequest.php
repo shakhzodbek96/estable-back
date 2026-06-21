@@ -28,6 +28,7 @@ class UpdateProductRequest extends FormRequest
                 'max:255',
                 Rule::unique('products', 'name')->ignore($productId),
             ],
+            'min_stock' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:1000000'],
         ];
     }
 }

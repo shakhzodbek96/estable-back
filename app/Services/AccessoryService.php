@@ -54,8 +54,9 @@ class AccessoryService
                 $totalCost += (float) $batch['purchase_price'] * (int) $batch['quantity'];
             }
 
-            if (!empty($data['investor_id']) && $totalCost > 0) {
+            if ($totalCost > 0) {
                 $rate = Rate::current();
+                $investorId = !empty($data['investor_id']) ? $data['investor_id'] : null;
 
                 $transaction = Transaction::create([
                     'amount' => $totalCost,
@@ -68,26 +69,29 @@ class AccessoryService
                         'accessory_ids' => $accessories->pluck('id')->all(),
                         'invoice_number' => $data['invoice_number'],
                         'batches_count' => $accessories->count(),
+                        'funded_by' => $investorId ? 'investor' : 'shop',
                     ],
                     'shop_id' => $data['shop_id'],
-                    'investor_id' => $data['investor_id'],
+                    'investor_id' => $investorId,
                     'created_by' => auth()->id(),
                     'accepted_by' => auth()->id(),
                 ]);
 
-                Investment::create([
-                    'investor_id' => $data['investor_id'],
-                    'transaction_id' => $transaction->id,
-                    'type' => InvestmentType::BuyingProduct,
-                    'is_credit' => false,
-                    'amount' => $totalCost,
-                    'rate' => $rate?->rate ?? 0,
-                    'comment' => "Aksessuar partiyalari: {$accessories->count()} ta (накл. {$data['invoice_number']})",
-                    'created_by' => auth()->id(),
-                ]);
+                if ($investorId) {
+                    Investment::create([
+                        'investor_id' => $investorId,
+                        'transaction_id' => $transaction->id,
+                        'type' => InvestmentType::BuyingProduct,
+                        'is_credit' => false,
+                        'amount' => $totalCost,
+                        'rate' => $rate?->rate ?? 0,
+                        'comment' => "Aksessuar partiyalari: {$accessories->count()} ta (накл. {$data['invoice_number']})",
+                        'created_by' => auth()->id(),
+                    ]);
 
-                $investor = Investor::lockForUpdate()->find($data['investor_id']);
-                $investor->decrement('balance', $totalCost);
+                    $investor = Investor::lockForUpdate()->find($investorId);
+                    $investor->decrement('balance', $totalCost);
+                }
             }
 
             return $accessories;
@@ -114,9 +118,11 @@ class AccessoryService
                 'created_by' => auth()->id(),
             ]);
 
-            if (!empty($data['investor_id'])) {
-                $totalCost = $data['purchase_price'] * $data['quantity'];
+            $totalCost = $data['purchase_price'] * $data['quantity'];
+
+            if ($totalCost > 0) {
                 $rate = Rate::current();
+                $investorId = !empty($data['investor_id']) ? $data['investor_id'] : null;
 
                 $transaction = Transaction::create([
                     'amount' => $totalCost,
@@ -129,26 +135,29 @@ class AccessoryService
                         'accessory_id' => $accessory->id,
                         'barcode' => $data['barcode'],
                         'quantity' => $data['quantity'],
+                        'funded_by' => $investorId ? 'investor' : 'shop',
                     ],
                     'shop_id' => $data['shop_id'],
-                    'investor_id' => $data['investor_id'],
+                    'investor_id' => $investorId,
                     'created_by' => auth()->id(),
                     'accepted_by' => auth()->id(),
                 ]);
 
-                Investment::create([
-                    'investor_id' => $data['investor_id'],
-                    'transaction_id' => $transaction->id,
-                    'type' => InvestmentType::BuyingProduct,
-                    'is_credit' => false,
-                    'amount' => $totalCost,
-                    'rate' => $rate?->rate ?? 0,
-                    'comment' => "Aksessuar partiyasi: {$data['barcode']}",
-                    'created_by' => auth()->id(),
-                ]);
+                if ($investorId) {
+                    Investment::create([
+                        'investor_id' => $investorId,
+                        'transaction_id' => $transaction->id,
+                        'type' => InvestmentType::BuyingProduct,
+                        'is_credit' => false,
+                        'amount' => $totalCost,
+                        'rate' => $rate?->rate ?? 0,
+                        'comment' => "Aksessuar partiyasi: {$data['barcode']}",
+                        'created_by' => auth()->id(),
+                    ]);
 
-                $investor = Investor::lockForUpdate()->find($data['investor_id']);
-                $investor->decrement('balance', $totalCost);
+                    $investor = Investor::lockForUpdate()->find($investorId);
+                    $investor->decrement('balance', $totalCost);
+                }
             }
 
             return $accessory;
@@ -227,6 +236,63 @@ class AccessoryService
             $investor->balance = (float) $investor->balance - $delta;
             $investor->save();
         }
+    }
+
+    /**
+     * Aksessuar partiyasini o'chirish. Investor mablag'iga olingan bo'lsa — xaridni teskari
+     * hisoblaymiz: kapital (purchase_price * quantity) investor balansiga qaytadi, bog'liq
+     * Purchase Transaction/Investment summasi kamayadi (oxirgisi bo'lsa — o'chiriladi).
+     */
+    public function deleteItem(Accessory $accessory): void
+    {
+        DB::transaction(function () use ($accessory) {
+            if ($accessory->investor_id) {
+                $contribution = (float) $accessory->purchase_price * (int) $accessory->quantity;
+                $this->reverseAccessoryPurchase($accessory, $contribution);
+            }
+            $accessory->delete();
+        });
+    }
+
+    private function reverseAccessoryPurchase(Accessory $accessory, float $contribution): void
+    {
+        Investor::where('id', $accessory->investor_id)->lockForUpdate()->increment('balance', $contribution);
+
+        $transaction = Transaction::where('type', TransactionType::Purchase)
+            ->where('investor_id', $accessory->investor_id)
+            ->where(function ($q) use ($accessory) {
+                $q->whereJsonContains('details->accessory_ids', $accessory->id)
+                  ->orWhere('details->accessory_id', $accessory->id);
+            })
+            ->first();
+
+        if (!$transaction) {
+            return;
+        }
+
+        $ids = collect($transaction->details['accessory_ids'] ?? [])
+            ->reject(fn ($id) => (int) $id === (int) $accessory->id)
+            ->values()->all();
+        $hadArray = array_key_exists('accessory_ids', $transaction->details ?? []);
+        $newAmount = (float) $transaction->amount - $contribution;
+
+        // Oddiy partiya (accessory_id, bitta) yoki bulk'da oxirgi accessory bo'lsa — tranzaksiyani o'chiramiz
+        if (! $hadArray || empty($ids) || $newAmount <= 0.001) {
+            Investment::where('transaction_id', $transaction->id)->delete();
+            $transaction->delete();
+            return;
+        }
+
+        $details = $transaction->details;
+        $details['accessory_ids'] = $ids;
+        $transaction->details = $details;
+        $transaction->amount = $newAmount;
+        $transaction->save();
+
+        Investment::where('transaction_id', $transaction->id)->get()->each(function (Investment $inv) use ($contribution) {
+            $inv->amount = (float) $inv->amount - $contribution;
+            $inv->save();
+        });
     }
 
     public function findForSale(string $barcode, int $shopId): ?Accessory

@@ -14,6 +14,8 @@ use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\QuickCustomerController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\SalePaymentController;
+use App\Http\Controllers\Api\ExpenseController;
+use App\Http\Controllers\Api\ShiftController;
 use App\Http\Controllers\Api\SaleScanController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\ReportController;
@@ -80,9 +82,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('sales/{sale}', [SaleController::class, 'destroy']);
 });
 
+// Smena ochish/ko'rish + chiqim yaratish (menejer ham); tasdiqlash admin guruhida
+Route::middleware(['auth:sanctum', 'role:admin,manager'])->group(function () {
+    Route::get('shifts/current', [ShiftController::class, 'current']);
+    Route::get('shifts', [ShiftController::class, 'index']);
+    Route::get('shifts/{shift}', [ShiftController::class, 'show']);
+    Route::post('shifts', [ShiftController::class, 'open']);
+    Route::post('expenses', [ExpenseController::class, 'store']); // pending yaratish
+});
+
 // Admin/Manager — to'lovlarni boshqarish
 Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::get('sale-payments/pending', [SalePaymentController::class, 'pending']);
+    Route::get('sale-payments/summary', [SalePaymentController::class, 'summary']);
     Route::post('sale-payments/bulk-accept', [SalePaymentController::class, 'bulkAccept']);
     Route::post('sale-payments/bulk-accept-sale', [SalePaymentController::class, 'bulkAcceptSale']);
     Route::get('sale-payments/{salePayment}', [SalePaymentController::class, 'show']);
@@ -90,6 +102,15 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::post('sale-payments/{salePayment}/accept', [SalePaymentController::class, 'accept']);
     Route::post('sale-payments/{salePayment}/reject', [SalePaymentController::class, 'reject']);
     Route::get('sellers/{user}/cash-summary', [SalePaymentController::class, 'cashSummary']);
+
+    // Kassa chiqimlari — tasdiqlash/rad (faqat admin)
+    Route::get('expenses/pending', [ExpenseController::class, 'pending']);
+    Route::get('expenses', [ExpenseController::class, 'index']);
+    Route::post('expenses/{expense}/accept', [ExpenseController::class, 'accept']);
+    Route::post('expenses/{expense}/reject', [ExpenseController::class, 'reject']);
+
+    // Smena yopish — naqд qabul qilish (faqat admin/rahbar)
+    Route::post('shifts/{shift}/close', [ShiftController::class, 'close']);
 
     // Returns
     Route::get('returns', [ReturnController::class, 'index']);

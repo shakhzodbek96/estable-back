@@ -19,6 +19,8 @@ class StoreReturnRequest extends FormRequest
     {
         return [
             'sale_item_id' => 'required|integer|exists:sale_items,id',
+            // Bulk (aksessuar) uchun qisman qaytarish miqdori. Bo'sh bo'lsa — butun sotuv qatori.
+            'returned_quantity' => 'nullable|integer|min:1',
             'reason' => ['required', Rule::enum(ReturnReason::class)],
             'reason_note' => 'nullable|string|max:1000',
             'return_type' => ['required', Rule::enum(ReturnType::class)],

@@ -16,6 +16,7 @@ class Return_ extends Model
     protected $fillable = [
         'sale_id',
         'sale_item_id',
+        'returned_quantity',
         'customer_id',
         'reason',
         'reason_note',
@@ -36,6 +37,7 @@ class Return_ extends Model
     protected function casts(): array
     {
         return [
+            'returned_quantity' => 'integer',
             'reason' => ReturnReason::class,
             'return_type' => ReturnType::class,
             'refund_amount' => 'decimal:2',

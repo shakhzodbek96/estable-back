@@ -30,13 +30,25 @@ class SaleService
                 && (bool) (Customer::find($data['customer_id'])?->is_wholesale);
             $this->discountLimits = $this->loadDiscountLimits();
 
+            // Server tomonda: to'lovlar yig'indisi tovarlar summasiga teng bo'lishi shart
+            // (UI buni majburlaydi; bu — defense-in-depth, to'g'ridan-to'g'ri/buggy API chaqiruvlariga qarshi).
+            $total = $this->calculateTotal($data['items']);
+            $this->assertPaymentsBalance($data['payments'], $total);
+
+            // Smena majburiy — ochiq smena bo'lmasa savdo qilib bo'lmaydi.
+            // Aks holda yig'ilган naqд hech qaysi smena сверка'siga kirmaydi.
+            $shopId = $this->determineShop($data['items']);
+            if (! \App\Models\CashShift::openForShop($shopId)) {
+                throw new \Exception('Откройте смену перед продажей');
+            }
+
             $sale = Sale::create([
                 'customer_id' => $data['customer_id'] ?? null,
                 'sale_date' => $data['sale_date'] ?? now()->toDateString(),
-                'total_price' => $this->calculateTotal($data['items']),
+                'total_price' => $total,
                 'payment_method' => $this->determinePaymentMethod($data['payments']),
                 'investor_id' => $this->determineInvestor($data['items']),
-                'shop_id' => $this->determineShop($data['items']),
+                'shop_id' => $shopId,
                 'sold_by' => auth()->id(),
             ]);
 
@@ -58,7 +70,7 @@ class SaleService
             $inventory = Inventory::lockForUpdate()->findOrFail($item['inventory_id']);
 
             if ($inventory->status !== InventoryStatus::InStock) {
-                throw new \Exception("Tovar mavjud emas: {$inventory->serial_number}");
+                throw new \Exception("Товар недоступен для продажи: {$inventory->serial_number}");
             }
 
             $basePrice = $this->isWholesale && $inventory->wholesale_price !== null
@@ -94,7 +106,7 @@ class SaleService
         $accessory = Accessory::lockForUpdate()->findOrFail($item['accessory_id']);
 
         if (!$accessory->is_active) {
-            throw new \Exception("Aksessuar partiyasi deaktivatsiya qilingan: {$accessory->barcode}");
+            throw new \Exception("Партия аксессуара неактивна (нет в наличии): {$accessory->barcode}");
         }
 
         $basePrice = $this->isWholesale && $accessory->wholesale_price !== null
@@ -106,13 +118,13 @@ class SaleService
         $quantity = $item['quantity'] ?? 1;
 
         if ($available < $quantity) {
-            throw new \Exception("Yetarli emas. Mavjud: {$available}");
+            throw new \Exception("Недостаточно товара «{$accessory->barcode}». В наличии: {$available}, запрошено: {$quantity}");
         }
 
         $accessory->increment('sold_quantity', $quantity);
 
-        // fresh() o'rniga increment natijasini hisobga olamiz
-        $newAvailable = $accessory->quantity - ($accessory->sold_quantity + $quantity) - $accessory->consigned_quantity;
+        // increment() xotiradagi sold_quantity'ni allaqachon yangiladi — qayta qo'shmaymiz
+        $newAvailable = $accessory->quantity - $accessory->sold_quantity - $accessory->consigned_quantity;
         if ($newAvailable <= 0) {
             $accessory->update(['is_active' => false]);
         }
@@ -142,6 +154,7 @@ class SaleService
         return SalePayment::create([
             'sale_id' => $sale->id,
             'shop_id' => $sale->shop_id,
+            'shift_id' => \App\Models\CashShift::openForShop($sale->shop_id)?->id,
             'amount' => $payment['amount'],
             'type' => $payment['type'],
             'rate' => $payment['rate'] ?? $rate?->rate ?? 0,
@@ -209,6 +222,33 @@ class SaleService
         });
     }
 
+    /**
+     * To'lovlar yig'indisi (USD'ga keltirilgan) tovarlar summasiga tengligini tekshiradi.
+     * Bu tizimda qisman/qarz sotuv yo'q — har sotuv to'liq to'lanadi (to'lovlar keyin tasdiqlanadi).
+     */
+    private function assertPaymentsBalance(array $payments, float $total): void
+    {
+        $rate = Rate::current();
+
+        $paid = collect($payments)->sum(function ($p) use ($rate) {
+            $amount = (float) ($p['amount'] ?? 0);
+            $currency = $p['currency'] ?? 'usd';
+            if ($currency === 'usd') {
+                return $amount;
+            }
+            $r = (float) ($p['rate'] ?? $rate?->rate ?? 0);
+            return $r > 0 ? $amount / $r : 0.0;
+        });
+
+        if (abs($paid - $total) > 0.01) {
+            throw new \Exception(sprintf(
+                'Сумма платежей ($%s) не совпадает с суммой товаров ($%s).',
+                number_format($paid, 2, '.', ''),
+                number_format($total, 2, '.', '')
+            ));
+        }
+    }
+
     private function determinePaymentMethod(array $payments): string
     {
         if (count($payments) > 1) return 'multiple';
@@ -249,6 +289,13 @@ class SaleService
         return (int) $unique->first();
     }
 
+    /**
+     * Sotuvning egasini (investor yoki do'kon) aniqlaydi.
+     *
+     * Sotuv BITTA egaga tegishli bo'lishi SHART: investor sotuvning TO'LIQ tushumini oladi,
+     * shuning uchun bir savatda turli egalar (ikki investor, yoki investor+do'kon) tovarlari
+     * bo'lsa hisob-kitob noaniq bo'lardi — bunday holatda xato (determineShop kabi).
+     */
     private function determineInvestor(array $items): ?int
     {
         $collection = collect($items);
@@ -257,20 +304,23 @@ class SaleService
         $serialIds = $collection->where('item_type', 'serial')->pluck('inventory_id')->filter()->values();
         $bulkIds = $collection->where('item_type', 'bulk')->pluck('accessory_id')->filter()->values();
 
-        $investorIds = collect();
+        $owners = collect();
 
         if ($serialIds->isNotEmpty()) {
-            $investorIds = $investorIds->merge(
-                Inventory::whereIn('id', $serialIds)->whereNotNull('investor_id')->pluck('investor_id')
-            );
+            $owners = $owners->merge(Inventory::whereIn('id', $serialIds)->pluck('investor_id'));
         }
         if ($bulkIds->isNotEmpty()) {
-            $investorIds = $investorIds->merge(
-                Accessory::whereIn('id', $bulkIds)->whereNotNull('investor_id')->pluck('investor_id')
-            );
+            $owners = $owners->merge(Accessory::whereIn('id', $bulkIds)->pluck('investor_id'));
         }
 
-        $unique = $investorIds->unique()->filter();
-        return $unique->count() === 1 ? $unique->first() : null;
+        // null (do'kon mablag'i) ni alohida ega sifatida qaraymiz
+        $distinct = $owners->map(fn ($v) => $v === null ? 'shop' : (int) $v)->unique()->values();
+
+        if ($distinct->count() > 1) {
+            throw new \Exception('В корзине товары разных владельцев (инвестор/магазин). Оформите отдельными продажами.');
+        }
+
+        $only = $distinct->first();
+        return ($only === null || $only === 'shop') ? null : (int) $only;
     }
 }

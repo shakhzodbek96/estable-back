@@ -28,6 +28,8 @@ class SalePaymentController extends Controller
             'sale.shop:id,name',
             'sale.items.inventory.product:id,name',
             'sale.items.accessory.product:id,name',
+            // Sotuvning barcha to'lovlari — tahrirlashda moslik tekshiruvi uchun (tasdiqlangan + yangi)
+            'sale.payments:id,sale_id,amount,currency,rate,status,type',
             'creator:id,name',
             'shop:id,name',
         ])
@@ -53,6 +55,21 @@ class SalePaymentController extends Controller
 
         return response()->json(
             $query->orderBy('created_at', 'desc')->paginate($perPage)
+        );
+    }
+
+    /**
+     * Kassa hisoboti — to'lov usuli × valyuta bo'yicha (pending + accepted).
+     */
+    public function summary(Request $request): JsonResponse
+    {
+        return response()->json(
+            $this->service->getKassaSummary([
+                'seller_id' => $request->integer('seller_id') ?: null,
+                'shop_id' => $request->integer('shop_id') ?: null,
+                'date_from' => $request->string('date_from')->trim()->value() ?: null,
+                'date_to' => $request->string('date_to')->trim()->value() ?: null,
+            ])
         );
     }
 
@@ -170,6 +187,31 @@ class SalePaymentController extends Controller
         // Cash/card bo'lsa — details'ni tozalash; p2p bo'lsa — saqlash
         if (isset($data['type']) && $data['type'] !== 'p2p') {
             $data['details'] = null;
+        }
+
+        // Audit log — summa/valyuta/kurs o'zgarganda edit_history'ga yozamiz
+        $history = $salePayment->edit_history ?? [];
+        $before = count($history);
+        foreach (['amount', 'currency', 'rate'] as $field) {
+            if (!array_key_exists($field, $data)) {
+                continue;
+            }
+            $current = $salePayment->{$field};
+            $old = $current instanceof \BackedEnum ? $current->value : (string) $current;
+            $new = (string) ($data[$field] ?? '');
+            if ($old !== $new) {
+                $history[] = [
+                    'field' => $field,
+                    'from' => $old,
+                    'to' => $new,
+                    'by' => auth()->id(),
+                    'by_name' => auth()->user()?->name,
+                    'at' => now()->toDateTimeString(),
+                ];
+            }
+        }
+        if (count($history) > $before) {
+            $data['edit_history'] = $history;
         }
 
         $salePayment->update($data);

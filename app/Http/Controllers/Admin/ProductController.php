@@ -94,6 +94,7 @@ class ProductController extends Controller
         $data = $request->validate([
             'category_id' => ['nullable', 'integer', 'exists:categories,id'],
             'type' => ['required', 'in:serial,bulk'],
+            'min_stock' => ['nullable', 'integer', 'min:0', 'max:1000000'],
             'names' => ['required', 'array', 'min:1', 'max:1000'],
             'names.*' => ['required', 'string', 'max:255'],
         ]);
@@ -117,7 +118,7 @@ class ProductController extends Controller
             try {
                 $product = Product::firstOrCreate(
                     ['name' => $name],
-                    ['category_id' => $data['category_id'] ?? null, 'type' => $data['type']]
+                    ['category_id' => $data['category_id'] ?? null, 'type' => $data['type'], 'min_stock' => $data['min_stock'] ?? null]
                 );
                 if ($product->wasRecentlyCreated) {
                     $created->push($product);
@@ -133,7 +134,9 @@ class ProductController extends Controller
             }
         }
 
-        $created->each->load('category:id,name');
+        // Barcha yangi mahsulotlar uchun category'ni 1 ta query bilan yuklash
+        // (avval `each->load` har mahsulotga alohida query qilardi — N+1).
+        $created->load('category:id,name');
         $allSkipped = $existing->merge($raceSkipped);
 
         return response()->json([

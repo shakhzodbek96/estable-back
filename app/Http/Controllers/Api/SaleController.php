@@ -111,6 +111,9 @@ class SaleController extends Controller
                         $accessory->update(['is_active' => true]);
                     }
                 }
+
+                // Konsignatsiya tovari bo'lsa — sotuvdagi partner-balans effektini teskari hisoblaymiz
+                app(\App\Services\ConsignmentService::class)->handleIncomingItemReturned($item);
             }
 
             $sale->payments()->delete();

@@ -14,4 +14,7 @@ enum TransactionType: string
     case Purchase = 'purchase';
     case ConsignmentPayment = 'consignment_payment';
     case ConsignmentReceipt = 'consignment_receipt';
+    case InvestorProfitShare = 'investor_profit_share'; // do'kon ulushi (dividend yechilganda investordan olingan foyda)
+    case Expense = 'expense';       // Kassa: prochie rasxodlar
+    case Withdrawal = 'withdrawal'; // Kassa: izyatie (egaga pul berish)
 }

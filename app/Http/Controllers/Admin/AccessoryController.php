@@ -110,7 +110,8 @@ class AccessoryController extends Controller
             return response()->json(['message' => 'Sotilgan partiyani o\'chirish mumkin emas'], 422);
         }
 
-        $accessory->delete();
+        // Investor mablag'iga olingan bo'lsa — xaridni teskari hisoblab keyin o'chiradi
+        $this->accessoryService->deleteItem($accessory);
 
         return response()->json(['message' => 'Deleted']);
     }

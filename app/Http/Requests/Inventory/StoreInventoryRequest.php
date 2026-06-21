@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Inventory;
 
+use App\Enums\InventoryStatus;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreInventoryRequest extends FormRequest
 {
@@ -15,7 +17,8 @@ class StoreInventoryRequest extends FormRequest
     {
         return [
             'product_id' => ['required', 'integer', 'exists:products,id'],
-            'serial_number' => ['required', 'string', 'max:255', 'unique:inventories,serial_number'],
+            // Uniqueness faqat skladda turgan tovarlarga: sotilgan serial qayta kiritilishi mumkin
+            'serial_number' => ['required', 'string', 'max:255', Rule::unique('inventories', 'serial_number')->where('status', InventoryStatus::InStock->value)],
             'extra_serial_number' => ['nullable', 'string', 'max:255'],
             'purchase_price' => ['required', 'numeric', 'min:0'],
             'selling_price' => ['required', 'numeric', 'min:0'],

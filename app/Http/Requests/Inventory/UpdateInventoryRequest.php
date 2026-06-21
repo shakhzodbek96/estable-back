@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Inventory;
 
+use App\Enums\InventoryStatus;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -17,7 +18,7 @@ class UpdateInventoryRequest extends FormRequest
         $inventoryId = $this->route('inventory')?->id;
 
         return [
-            'serial_number' => ['sometimes', 'required', 'string', 'max:255', Rule::unique('inventories', 'serial_number')->ignore($inventoryId)],
+            'serial_number' => ['sometimes', 'required', 'string', 'max:255', Rule::unique('inventories', 'serial_number')->where('status', InventoryStatus::InStock->value)->ignore($inventoryId)],
             'extra_serial_number' => ['nullable', 'string', 'max:255'],
             'purchase_price' => ['sometimes', 'numeric', 'min:0'],
             'extra_cost' => ['sometimes', 'numeric', 'min:0'],

@@ -2,11 +2,13 @@
 
 namespace App\Services;
 
+use App\Enums\Currency;
 use App\Enums\InvestmentType;
 use App\Enums\InventoryStatus;
 use App\Enums\ItemCondition;
 use App\Enums\ReturnStatus;
 use App\Enums\ReturnType;
+use App\Enums\SalePaymentStatus;
 use App\Enums\TransactionType;
 use App\Models\Inventory;
 use App\Models\Investment;
@@ -14,6 +16,7 @@ use App\Models\Investor;
 use App\Models\Rate;
 use App\Models\Return_;
 use App\Models\SaleItem;
+use App\Models\SalePayment;
 use App\Models\Transaction;
 use Illuminate\Support\Facades\DB;
 
@@ -26,18 +29,30 @@ class ReturnService
     {
         $saleItem = SaleItem::with(['sale', 'inventory', 'accessory'])->findOrFail($data['sale_item_id']);
 
-        // Allaqachon qaytarilganmi?
-        $existing = Return_::where('sale_item_id', $saleItem->id)
-            ->whereIn('status', [ReturnStatus::Pending, ReturnStatus::Completed])
-            ->exists();
+        $isSerial = $saleItem->item_type->value === 'serial';
+        $lineQty = $isSerial ? 1 : (int) $saleItem->quantity;
 
-        if ($existing) {
-            throw new \Exception("Bu tovar allaqachon qaytarilgan yoki kutilmoqda");
+        // Shu sotuv qatori bo'yicha allaqachon qaytarilgan (kutilayotgan + tugallangan) miqdor
+        $alreadyReturned = (int) Return_::where('sale_item_id', $saleItem->id)
+            ->whereIn('status', [ReturnStatus::Pending, ReturnStatus::Completed])
+            ->sum('returned_quantity');
+
+        // Qaytarilayotgan miqdor: serial -> doim 1; bulk -> berilgan yoki qolgan butun miqdor
+        $qty = $isSerial ? 1 : (int) ($data['returned_quantity'] ?? max(0, $lineQty - $alreadyReturned));
+
+        if ($qty < 1) {
+            throw new \Exception("Noto'g'ri qaytarish miqdori");
+        }
+
+        if ($alreadyReturned + $qty > $lineQty) {
+            $remaining = max(0, $lineQty - $alreadyReturned);
+            throw new \Exception("Можно вернуть не более {$remaining} ед. (уже возвращено {$alreadyReturned} из {$lineQty}).");
         }
 
         return Return_::create([
             'sale_id' => $saleItem->sale_id,
             'sale_item_id' => $saleItem->id,
+            'returned_quantity' => $qty,
             'customer_id' => $saleItem->sale->customer_id,
             'reason' => $data['reason'],
             'reason_note' => $data['reason_note'] ?? null,
@@ -62,6 +77,14 @@ class ReturnService
             throw new \Exception("Faqat kutilayotgan qaytarishni tasdiqlash mumkin");
         }
 
+        // Obmen (ExchangeSame/ExchangeDifferent) hozircha hisob-kitobni amalga oshirmaydi:
+        // original sotuv krediti teskari hisoblanmaydi, price_difference va yangi sotuv (new_sale_id)
+        // yozilmaydi. Jim "yarim ishlash" o'rniga aniq bloklaymiz — to'liq qo'llab-quvvatlash
+        // alohida funksional sifatida qo'shilishi kerak (qaytarish + yangi sotuv rasmiylashtirish).
+        if (in_array($return->return_type, [ReturnType::ExchangeSame, ReturnType::ExchangeDifferent], true)) {
+            throw new \Exception('Обмен товара пока не поддерживается в учёте. Оформите возврат, затем новую продажу.');
+        }
+
         return DB::transaction(function () use ($return) {
             $return->update([
                 'status' => ReturnStatus::Completed,
@@ -71,6 +94,11 @@ class ReturnService
 
             $saleItem = $return->saleItem()->with(['inventory', 'accessory'])->first();
             $investorId = $saleItem->sale->investor_id;
+
+            // Qaytarilayotgan miqdor — bulk uchun qisman bo'lishi mumkin; serial uchun doim 1.
+            $qty = $saleItem->item_type->value === 'serial'
+                ? 1
+                : (int) ($return->returned_quantity ?? $saleItem->quantity);
 
             // Tovar statusini yangilash
             if ($saleItem->item_type->value === 'serial' && $saleItem->inventory) {
@@ -92,10 +120,11 @@ class ReturnService
 
                 $saleItem->inventory->update($updateData);
             } elseif ($saleItem->item_type->value === 'bulk' && $saleItem->accessory) {
-                $saleItem->accessory->decrement('sold_quantity', $saleItem->quantity);
+                // Faqat qaytarilgan miqdorni qaytaramiz (qisman qaytarishni qo'llab-quvvatlash)
+                $saleItem->accessory->decrement('sold_quantity', $qty);
 
                 if ($return->item_condition === ItemCondition::DefectiveUnusable) {
-                    $saleItem->accessory->decrement('quantity', $saleItem->quantity);
+                    $saleItem->accessory->decrement('quantity', $qty);
                 }
 
                 $accessory = $saleItem->accessory->fresh();
@@ -104,6 +133,10 @@ class ReturnService
                     $accessory->update(['is_active' => true]);
                 }
             }
+
+            // Konsignatsiya (incoming) tovari bo'lsa — sotuvdagi partner-balans va
+            // consignmentItem.sold_quantity effektini teskari hisoblaymiz (qty bo'yicha).
+            app(ConsignmentService::class)->handleIncomingItemReturned($saleItem, $qty);
 
             // Refund uchun Transaction va investor balansi
             if ($return->return_type === ReturnType::Refund && $return->refund_amount > 0) {
@@ -127,20 +160,36 @@ class ReturnService
                 ]);
 
                 if ($investorId && !$return->transfers_to_shop) {
-                    Investor::where('id', $investorId)
-                        ->lockForUpdate()
-                        ->decrement('balance', $return->refund_amount);
+                    // Investor sotuv to'lovlari qabul qilingani sayin INKREMENTAL kreditlanadi
+                    // (SalePaymentService::accept), oldindan to'liq narxga emas. Shuning uchun
+                    // qaytarishda investordan faqat AYNI sotuvda haqiqatda kreditlangan summagacha
+                    // (qabul qilingan to'lovlar, USD) qaytaramiz — ortig'i emas. Bu qisman/umuman
+                    // to'lanmagan sotuvda balansning asossiz manfiyga ketishini oldini oladi.
+                    $creditedUsd = (float) SalePayment::where('sale_id', $return->sale_id)
+                        ->where('status', SalePaymentStatus::Accepted)
+                        ->get()
+                        ->sum(fn ($p) => $p->currency === Currency::Usd
+                            ? (float) $p->amount
+                            : (float) $p->amount / max((float) $p->rate, 0.0000001));
 
-                    Investment::create([
-                        'investor_id' => $investorId,
-                        'transaction_id' => $refundTransaction->id,
-                        'type' => InvestmentType::ClientsPayment,
-                        'is_credit' => false,
-                        'amount' => $return->refund_amount,
-                        'rate' => $rate?->rate ?? 0,
-                        'comment' => "Qaytarish #{$return->id}",
-                        'created_by' => auth()->id(),
-                    ]);
+                    $reverseAmount = min((float) $return->refund_amount, $creditedUsd);
+
+                    if ($reverseAmount > 0) {
+                        Investor::where('id', $investorId)
+                            ->lockForUpdate()
+                            ->decrement('balance', $reverseAmount);
+
+                        Investment::create([
+                            'investor_id' => $investorId,
+                            'transaction_id' => $refundTransaction->id,
+                            'type' => InvestmentType::ClientsPayment,
+                            'is_credit' => false,
+                            'amount' => $reverseAmount,
+                            'rate' => $rate?->rate ?? 0,
+                            'comment' => "Qaytarish #{$return->id}",
+                            'created_by' => auth()->id(),
+                        ]);
+                    }
                 }
             }
 
@@ -201,6 +250,10 @@ class ReturnService
      */
     public function writeOff(Inventory $inventory, string $reason): Inventory
     {
+        if ($inventory->status === InventoryStatus::WrittenOff) {
+            throw new \Exception('Товар уже списан');
+        }
+
         return DB::transaction(function () use ($inventory, $reason) {
             $totalCost = (float) $inventory->purchase_price + (float) $inventory->extra_cost;
 
@@ -211,6 +264,10 @@ class ReturnService
 
             $rate = Rate::current();
 
+            // WriteOff — faqat yo'qotish/xarajat yozuvi. Investor balansiga TEGILMAYDI:
+            // kapital xarid paytida allaqachon balansdan chiqqan (investor inventarga egalik
+            // qiladi va riskni o'zi ko'taradi), shuning uchun bu yerda yana decrement qilish
+            // ikki marta hisoblash bo'lardi. Zarar = sotilmagan/qaytmagan kapital.
             Transaction::create([
                 'amount' => $totalCost,
                 'currency' => 'usd',
@@ -227,12 +284,6 @@ class ReturnService
                     'reason' => $reason,
                 ],
             ]);
-
-            if ($inventory->investor_id) {
-                Investor::where('id', $inventory->investor_id)
-                    ->lockForUpdate()
-                    ->decrement('balance', $totalCost);
-            }
 
             return $inventory;
         });

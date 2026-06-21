@@ -12,6 +12,7 @@ class SalePayment extends Model
     protected $fillable = [
         'sale_id',
         'shop_id',
+        'shift_id',
         'amount',
         'type',
         'rate',
@@ -24,6 +25,7 @@ class SalePayment extends Model
         'checked_by',
         'comment',
         'details',
+        'edit_history',
     ];
 
     protected function casts(): array
@@ -35,6 +37,7 @@ class SalePayment extends Model
             'status' => SalePaymentStatus::class,
             'checked_at' => 'datetime',
             'details' => 'array',
+            'edit_history' => 'array',
         ];
     }
 

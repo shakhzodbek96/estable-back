@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Enums\InventoryStatus;
+use Illuminate\Validation\Rule;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Inventory\BulkStoreInventoryRequest;
 use App\Http\Requests\Inventory\StoreInventoryRequest;
@@ -41,6 +42,16 @@ class InventoryController extends Controller
 
         if ($status = $request->string('status')->trim()->value()) {
             $query->where('status', $status);
+        }
+
+        // Karobka holati: "1"/"0" (true/false)
+        if ($request->filled('has_box')) {
+            $query->where('has_box', $request->boolean('has_box'));
+        }
+
+        // Tovar holati: new / used
+        if ($state = $request->string('state')->trim()->value()) {
+            $query->where('state', $state);
         }
 
         if ($shopId = $request->integer('shop_id')) {
@@ -113,7 +124,8 @@ class InventoryController extends Controller
             return response()->json(['message' => 'Faqat in_stock tovarni o\'chirish mumkin'], 422);
         }
 
-        $inventory->delete();
+        // Investor mablag'iga olingan bo'lsa — xaridni teskari hisoblab keyin o'chiradi
+        $this->inventoryService->deleteItem($inventory);
 
         return response()->json(['message' => 'Deleted']);
     }
@@ -161,8 +173,9 @@ class InventoryController extends Controller
             return response()->json(['message' => 'Файл пуст или не содержит корректных строк (нужны product и imei).'], 422);
         }
 
-        // 1. IMEI'larni DB bilan solishtirish
+        // 1. IMEI'larni DB bilan solishtirish — faqat skladda turganlar (sotilgan serial qayta kiritilishi mumkin)
         $existingImeis = Inventory::whereIn('serial_number', $rows->pluck('imei')->all())
+            ->where('status', InventoryStatus::InStock)
             ->pluck('serial_number')
             ->values();
         $rowsAfterImei = $rows->reject(fn ($r) => $existingImeis->contains($r['imei']))->values();
@@ -257,7 +270,7 @@ class InventoryController extends Controller
 
         // 4. Yana bir bor IMEI uniqueness tekshiruvi (race condition)
         $validator = Validator::make(['rows' => $richRows->all()], [
-            'rows.*.serial_number' => ['required', 'string', 'max:255', 'distinct', 'unique:inventories,serial_number'],
+            'rows.*.serial_number' => ['required', 'string', 'max:255', 'distinct', Rule::unique('inventories', 'serial_number')->where('status', InventoryStatus::InStock->value)],
         ]);
         if ($validator->fails()) {
             return response()->json([

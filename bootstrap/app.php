@@ -13,7 +13,8 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
-        health: '/up',
+        // Laravel'ning standart '/up' health sahifasi o'chirildi (fingerprint).
+        // O'rniga routes/web.php da umumiy '/up' (plain "ok") qaytariladi.
         then: function () {
             // Central admin endpointlari — tenant middleware'siz, central DB'da ishlaydi.
             // URL prefix: /api/central/*
@@ -28,6 +29,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'tenant' => \App\Http\Middleware\InitializeTenancyByOriginHeader::class,
             'admin' => \App\Http\Middleware\EnsureAdminUser::class,
         ]);
+
+        // Stack'ni oshkor qiluvchi header'larni (X-Powered-By) har bir javobdan
+        // olib tashlaymiz — barcha so'rovlar uchun global.
+        $middleware->append(\App\Http\Middleware\ObscureFingerprint::class);
 
         /**
          * Production'da Cloudflare (va ehtimol HestiaCP nginx) orqali

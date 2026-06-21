@@ -18,6 +18,7 @@ class Transaction extends Model
         'transaction_date',
         'details',
         'shop_id',
+        'shift_id',
         'investor_id',
         'created_by',
         'accepted_by',

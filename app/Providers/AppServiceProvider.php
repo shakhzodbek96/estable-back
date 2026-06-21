@@ -11,7 +11,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Sanctum'ning '/sanctum/csrf-cookie' route'ini o'chiramiz — u Laravel/Sanctum
+        // ishlatilishini oshkor qiladi. Biz token-auth (Bearer) ishlatamiz, SPA cookie
+        // oqimi kerak emas. (SanctumServiceProvider::boot() shu config'ni o'qiydi.)
+        config(['sanctum.routes' => false]);
     }
 
     /**

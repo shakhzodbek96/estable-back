@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Inventory;
 
+use App\Enums\InventoryStatus;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class BulkStoreInventoryRequest extends FormRequest
 {
@@ -24,7 +26,7 @@ class BulkStoreInventoryRequest extends FormRequest
             'shop_id' => ['required', 'integer', 'exists:shops,id'],
             'investor_id' => ['nullable', 'integer', 'exists:investors,id'],
             'serials' => ['required', 'array', 'min:1'],
-            'serials.*.serial_number' => ['required', 'string', 'max:255', 'distinct', 'unique:inventories,serial_number'],
+            'serials.*.serial_number' => ['required', 'string', 'max:255', 'distinct', Rule::unique('inventories', 'serial_number')->where('status', InventoryStatus::InStock->value)],
             'serials.*.extra_serial_number' => ['nullable', 'string', 'max:255'],
             'serials.*.extra_cost' => ['nullable', 'numeric', 'min:0'],
             'serials.*.notes' => ['nullable', 'string', 'max:1000'],
@@ -34,7 +36,7 @@ class BulkStoreInventoryRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'serials.*.serial_number.unique' => 'IMEI :input уже существует в базе.',
+            'serials.*.serial_number.unique' => 'IMEI :input уже есть на складе (в наличии).',
             'serials.*.serial_number.distinct' => 'IMEI :input дублируется в списке.',
         ];
     }

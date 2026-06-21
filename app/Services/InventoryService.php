@@ -44,9 +44,14 @@ class InventoryService
                 ]));
             }
 
-            if (!empty($data['investor_id'])) {
-                $totalCost = $data['purchase_price'] * count($data['serials']) + $totalExtraCost;
+            // Har qanday tovar kirimi xarajat sifatida Transaction (type=Purchase) yaratadi.
+            // Investor tanlangan bo'lsa — qo'shimcha Investment + investor.balance kamayadi.
+            // Investor tanlanmagan bo'lsa — do'kon xarajati (investor_id = null, shop_id orqali ajraladi).
+            $totalCost = $data['purchase_price'] * count($data['serials']) + $totalExtraCost;
+
+            if ($totalCost > 0) {
                 $rate = Rate::current();
+                $investorId = !empty($data['investor_id']) ? $data['investor_id'] : null;
 
                 $transaction = Transaction::create([
                     'amount' => $totalCost,
@@ -59,26 +64,29 @@ class InventoryService
                         'inventory_ids' => $inventories->pluck('id')->all(),
                         'product_id' => $data['product_id'],
                         'serial_count' => count($data['serials']),
+                        'funded_by' => $investorId ? 'investor' : 'shop',
                     ],
                     'shop_id' => $data['shop_id'],
-                    'investor_id' => $data['investor_id'],
+                    'investor_id' => $investorId,
                     'created_by' => auth()->id(),
                     'accepted_by' => auth()->id(),
                 ]);
 
-                Investment::create([
-                    'investor_id' => $data['investor_id'],
-                    'transaction_id' => $transaction->id,
-                    'type' => InvestmentType::BuyingProduct,
-                    'is_credit' => false,
-                    'amount' => $totalCost,
-                    'rate' => $rate?->rate ?? 0,
-                    'comment' => "Tovar kiritildi: " . count($data['serials']) . " dona",
-                    'created_by' => auth()->id(),
-                ]);
+                if ($investorId) {
+                    Investment::create([
+                        'investor_id' => $investorId,
+                        'transaction_id' => $transaction->id,
+                        'type' => InvestmentType::BuyingProduct,
+                        'is_credit' => false,
+                        'amount' => $totalCost,
+                        'rate' => $rate?->rate ?? 0,
+                        'comment' => "Tovar kiritildi: " . count($data['serials']) . " dona",
+                        'created_by' => auth()->id(),
+                    ]);
 
-                $investor = Investor::lockForUpdate()->find($data['investor_id']);
-                $investor->decrement('balance', $totalCost);
+                    $investor = Investor::lockForUpdate()->find($investorId);
+                    $investor->decrement('balance', $totalCost);
+                }
             }
 
             return $inventories;
@@ -149,6 +157,59 @@ class InventoryService
     }
 
     /**
+     * Inventory tovarni o'chirish. Investor mablag'iga olingan bo'lsa — xaridni teskari
+     * hisoblaymiz: kapital investor balansiga qaytadi, bog'liq Purchase Transaction/Investment
+     * summasi kamayadi (oxirgi tovar bo'lsa — butunlay o'chiriladi). Aks holda balans drift bo'ladi.
+     */
+    public function deleteItem(Inventory $inventory): void
+    {
+        DB::transaction(function () use ($inventory) {
+            if ($inventory->investor_id) {
+                $contribution = (float) $inventory->purchase_price + (float) $inventory->extra_cost;
+                $this->reverseInventoryPurchase($inventory, $contribution);
+            }
+            $inventory->delete();
+        });
+    }
+
+    private function reverseInventoryPurchase(Inventory $inventory, float $contribution): void
+    {
+        // Kapitalni investor balansiga qaytaramiz
+        Investor::where('id', $inventory->investor_id)->lockForUpdate()->increment('balance', $contribution);
+
+        $transaction = Transaction::where('type', TransactionType::Purchase)
+            ->where('investor_id', $inventory->investor_id)
+            ->whereJsonContains('details->inventory_ids', $inventory->id)
+            ->first();
+
+        if (!$transaction) {
+            return; // bog'liq tranzaksiya topilmadi — kamida balans to'g'rilandi
+        }
+
+        $ids = collect($transaction->details['inventory_ids'] ?? [])
+            ->reject(fn ($id) => (int) $id === (int) $inventory->id)
+            ->values()->all();
+        $newAmount = (float) $transaction->amount - $contribution;
+
+        if (empty($ids) || $newAmount <= 0.001) {
+            Investment::where('transaction_id', $transaction->id)->delete();
+            $transaction->delete();
+            return;
+        }
+
+        $details = $transaction->details;
+        $details['inventory_ids'] = $ids;
+        $transaction->details = $details;
+        $transaction->amount = $newAmount;
+        $transaction->save();
+
+        Investment::where('transaction_id', $transaction->id)->get()->each(function (Investment $inv) use ($contribution) {
+            $inv->amount = (float) $inv->amount - $contribution;
+            $inv->save();
+        });
+    }
+
+    /**
      * Rich import — har qatorda alohida tovar/narx/holat bo'ladigan import.
      *
      * Shared maydonlar: shop_id, investor_id (ixtiyoriy)
@@ -188,8 +249,9 @@ class InventoryService
                 $totalCost += (float) $row['purchase_price'];
             }
 
-            if (!empty($data['investor_id']) && $totalCost > 0) {
+            if ($totalCost > 0) {
                 $rate = Rate::current();
+                $investorId = !empty($data['investor_id']) ? $data['investor_id'] : null;
 
                 $transaction = Transaction::create([
                     'amount' => $totalCost,
@@ -202,26 +264,29 @@ class InventoryService
                         'inventory_ids' => $inventories->pluck('id')->all(),
                         'serial_count' => $inventories->count(),
                         'source' => 'rich_import',
+                        'funded_by' => $investorId ? 'investor' : 'shop',
                     ],
                     'shop_id' => $data['shop_id'],
-                    'investor_id' => $data['investor_id'],
+                    'investor_id' => $investorId,
                     'created_by' => auth()->id(),
                     'accepted_by' => auth()->id(),
                 ]);
 
-                Investment::create([
-                    'investor_id' => $data['investor_id'],
-                    'transaction_id' => $transaction->id,
-                    'type' => InvestmentType::BuyingProduct,
-                    'is_credit' => false,
-                    'amount' => $totalCost,
-                    'rate' => $rate?->rate ?? 0,
-                    'comment' => "Импорт: {$inventories->count()} ед.",
-                    'created_by' => auth()->id(),
-                ]);
+                if ($investorId) {
+                    Investment::create([
+                        'investor_id' => $investorId,
+                        'transaction_id' => $transaction->id,
+                        'type' => InvestmentType::BuyingProduct,
+                        'is_credit' => false,
+                        'amount' => $totalCost,
+                        'rate' => $rate?->rate ?? 0,
+                        'comment' => "Импорт: {$inventories->count()} ед.",
+                        'created_by' => auth()->id(),
+                    ]);
 
-                $investor = Investor::lockForUpdate()->find($data['investor_id']);
-                $investor->decrement('balance', $totalCost);
+                    $investor = Investor::lockForUpdate()->find($investorId);
+                    $investor->decrement('balance', $totalCost);
+                }
             }
 
             return $inventories;
@@ -230,6 +295,15 @@ class InventoryService
 
     public function addRepairCost(Inventory $inventory, array $data): RepairCost
     {
+        // Remont xarajatini faqat «ta'mirda» turgan tovarga qo'shish mumkin — aks holda
+        // yopilgan sotuvning COGS'i (extra_cost) retroaktiv buzilardi va investor balansi
+        // hech qanday asossiz kamayardi (sendToRepair/returnFromRepair guard'lariga monand).
+        if ($inventory->status !== InventoryStatus::InRepair) {
+            throw new \InvalidArgumentException(
+                'Ремонтные расходы можно добавить только товару в статусе «в ремонте».'
+            );
+        }
+
         return DB::transaction(function () use ($inventory, $data) {
             $cost = RepairCost::create([
                 'inventory_id' => $inventory->id,
@@ -245,12 +319,13 @@ class InventoryService
 
             $rate = Rate::current();
 
-            Transaction::create([
+            $transaction = Transaction::create([
                 'amount' => $data['amount'],
                 'currency' => 'usd',
                 'rate' => $rate?->rate ?? 0,
                 'is_credit' => false,
                 'type' => TransactionType::Repair,
+                'transaction_date' => now()->toDateString(),
                 'shop_id' => $inventory->shop_id,
                 'investor_id' => $inventory->investor_id,
                 'created_by' => auth()->id(),
@@ -261,9 +336,24 @@ class InventoryService
                 ],
             ]);
 
+            // Investor mablag'iga olingan tovar bo'lsa — remont kapitalini balansdan chiqaramiz
+            // VA parity (balance == SUM(investments)) uchun Investment yozuvi yaratamiz —
+            // boshqa barcha balans-o'zgartiruvchi yo'llar kabi.
             if ($inventory->investor_id) {
-                $investor = Investor::lockForUpdate()->find($inventory->investor_id);
-                $investor->decrement('balance', $data['amount']);
+                Investment::create([
+                    'investor_id' => $inventory->investor_id,
+                    'transaction_id' => $transaction->id,
+                    'type' => InvestmentType::BuyingProduct,
+                    'is_credit' => false,
+                    'amount' => $data['amount'],
+                    'rate' => $rate?->rate ?? 0,
+                    'comment' => "Ремонт #{$cost->id}",
+                    'created_by' => auth()->id(),
+                ]);
+
+                Investor::where('id', $inventory->investor_id)
+                    ->lockForUpdate()
+                    ->decrement('balance', $data['amount']);
             }
 
             return $cost;
