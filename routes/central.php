@@ -61,8 +61,10 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     // Tenant admin password reset (yangi parol qaytaradi, must_change=true)
     Route::post('tenants/{id}/reset-admin-password', [TenantController::class, 'resetAdminPassword']);
 
-    // Tenant schema ichidagi foydalanuvchilar ro'yxati
+    // Tenant schema ichidagi foydalanuvchilar ro'yxati va boshqaruv
     Route::get('tenants/{id}/users', [TenantController::class, 'users']);
+    Route::post('tenants/{id}/users', [TenantController::class, 'storeUser']);
+    Route::post('tenants/{id}/users/{userId}/reset-password', [TenantController::class, 'resetUserPassword']);
 
     // Super admin akkauntlarni boshqarish
     Route::get('admin-users', [AdminUserController::class, 'index']);

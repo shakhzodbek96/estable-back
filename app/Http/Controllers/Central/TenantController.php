@@ -9,6 +9,8 @@ use App\Models\Tenant;
 use App\Services\TenantService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
@@ -212,6 +214,68 @@ class TenantController extends Controller
                 'username' => 'admin',
                 'password' => $newPassword,
                 'note' => 'Bu parolni saqlab qoling — qayta ko\'rsatilmaydi. Birinchi login\'dan so\'ng tenant admin parolni almashtirishi kerak.',
+            ],
+        ]);
+    }
+
+    /**
+     * Tenant schema ichiga yangi foydalanuvchi yaratish (central admin tomonidan).
+     */
+    public function storeUser(Request $request, string $id): JsonResponse
+    {
+        $tenant = Tenant::findOrFail($id);
+
+        $data = $request->validate([
+            'name'     => ['required', 'string', 'max:255'],
+            'username' => ['required', 'string', 'max:64', 'alpha_dash'],
+            'phone'    => ['nullable', 'string', 'regex:/^\d{9}$/'],
+            'role'     => ['required', Rule::in(['admin', 'manager', 'seller'])],
+            'password' => ['required', 'string', 'min:6'],
+        ]);
+
+        $user = $tenant->run(function () use ($data) {
+            if (\App\Models\User::where('username', $data['username'])->exists()) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'username' => ['Bu username allaqachon band.'],
+                ]);
+            }
+
+            return \App\Models\User::create(array_merge($data, [
+                'must_change_password' => true,
+            ]))->toArray();
+        });
+
+        return response()->json($user, 201);
+    }
+
+    /**
+     * Tenant user parolini tiklash — yangi tasodifiy parol generatsiya qiladi.
+     */
+    public function resetUserPassword(string $id, int $userId): JsonResponse
+    {
+        $tenant = Tenant::findOrFail($id);
+
+        $result = $tenant->run(function () use ($userId) {
+            $user = \App\Models\User::findOrFail($userId);
+            $newPassword = Str::random(12);
+
+            $user->update([
+                'password'             => Hash::make($newPassword),
+                'must_change_password' => true,
+            ]);
+
+            return [
+                'username' => $user->username,
+                'password' => $newPassword,
+            ];
+        });
+
+        return response()->json([
+            'message'     => 'Parol muvaffaqiyatli tiklandi.',
+            'credentials' => [
+                'username' => $result['username'],
+                'password' => $result['password'],
+                'note'     => 'Bu parolni saqlab qoling — qayta ko\'rsatilmaydi. Birinchi login\'dan so\'ng user parolni almashtirishi kerak.',
             ],
         ]);
     }
