@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\InventoryStatus;
+use App\Models\Concerns\HasImages;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
@@ -11,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Inventory extends Model
 {
+    use HasImages;
+
     protected $fillable = [
         'product_id',
         'serial_number',

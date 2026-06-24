@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreShopRequest;
 use App\Http\Requests\Admin\UpdateShopRequest;
 use App\Models\Shop;
+use App\Support\TenantMedia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rules\File;
 
 class ShopController extends Controller
 {
@@ -58,8 +60,49 @@ class ShopController extends Controller
 
     public function destroy(Shop $shop): JsonResponse
     {
+        TenantMedia::delete($shop->image_path);
+
         $shop->delete();
 
         return response()->json(['message' => 'Deleted']);
+    }
+
+    /**
+     * Do'kon rasmini yuklash (S3). Eski rasm almashtiriladi.
+     */
+    public function uploadImage(Request $request, Shop $shop): JsonResponse
+    {
+        $request->validate([
+            'image' => [
+                'required',
+                File::image()
+                    ->types(['jpg', 'jpeg', 'png', 'webp'])
+                    ->max(5 * 1024), // 5 MB
+            ],
+        ]);
+
+        // Kalit: <tenant-id>/shop/<uuid>.<ext> — eski rasm almashtiriladi.
+        $path = TenantMedia::store($request->file('image'), $shop, $shop->image_path);
+
+        $shop->update(['image_path' => $path]);
+
+        $shop->load('creator:id,name,username');
+
+        return response()->json($shop);
+    }
+
+    /**
+     * Do'kon rasmini o'chirish.
+     */
+    public function deleteImage(Shop $shop): JsonResponse
+    {
+        if ($shop->image_path) {
+            TenantMedia::delete($shop->image_path);
+            $shop->update(['image_path' => null]);
+        }
+
+        $shop->load('creator:id,name,username');
+
+        return response()->json($shop);
     }
 }

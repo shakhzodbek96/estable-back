@@ -25,7 +25,7 @@ class InventoryController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Inventory::with(['product:id,name,type', 'shop:id,name', 'investor:id,name']);
+        $query = Inventory::with(['product:id,name,type', 'product.primaryImage', 'primaryImage', 'shop:id,name', 'investor:id,name']);
 
         if ($search = $request->string('search')->trim()->value()) {
             $query->where(function ($q) use ($search) {
@@ -101,6 +101,8 @@ class InventoryController extends Controller
         $inventory->load([
             'product:id,name,type,category_id',
             'product.category:id,name',
+            'product.images',
+            'images',
             'shop:id,name',
             'investor:id,name,phone',
             'creator:id,name',

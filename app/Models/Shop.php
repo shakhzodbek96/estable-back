@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use App\Support\TenantMedia;
 
 class Shop extends Model
 {
@@ -13,8 +15,29 @@ class Shop extends Model
 
     protected $fillable = [
         'name',
+        'image_path',
+        'address',
+        'yandex_maps_url',
+        'google_maps_url',
+        'working_hours',
         'created_by',
     ];
+
+    protected $casts = [
+        'working_hours' => 'array',
+    ];
+
+    protected $appends = ['image_url'];
+
+    /**
+     * Rasmning to'liq URL'i (S3). image_path tenant-prefiksli kalit.
+     */
+    protected function imageUrl(): Attribute
+    {
+        return Attribute::get(
+            fn () => TenantMedia::url($this->image_path)
+        );
+    }
 
     public function creator(): BelongsTo
     {

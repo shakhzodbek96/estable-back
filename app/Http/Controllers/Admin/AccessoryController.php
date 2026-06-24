@@ -25,7 +25,7 @@ class AccessoryController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $query = Accessory::with(['product:id,name,type', 'shop:id,name', 'investor:id,name']);
+        $query = Accessory::with(['product:id,name,type', 'shop:id,name', 'investor:id,name', 'primaryImage']);
 
         if ($productId = $request->integer('product_id')) {
             $query->where('product_id', $productId);
@@ -86,6 +86,7 @@ class AccessoryController extends Controller
             'shop:id,name',
             'investor:id,name,phone',
             'creator:id,name',
+            'images',
         ]);
 
         return response()->json($accessory);

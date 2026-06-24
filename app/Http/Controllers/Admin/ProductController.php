@@ -16,7 +16,7 @@ class ProductController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $query = Product::query()->with('category:id,name');
+        $query = Product::query()->with(['category:id,name', 'images']);
 
         if ($search = $request->string('search')->trim()->value()) {
             $query->where('name', 'ilike', "%{$search}%");
@@ -46,7 +46,7 @@ class ProductController extends Controller
 
     public function show(Product $product): JsonResponse
     {
-        $product->load('category:id,name');
+        $product->load('category:id,name', 'images');
 
         return response()->json($product);
     }

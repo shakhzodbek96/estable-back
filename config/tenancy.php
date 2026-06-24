@@ -143,7 +143,8 @@ return [
         'disks' => [
             'local',
             'public',
-            // 's3',
+            // 's3' — qo'lda boshqaramiz (App\Support\TenantMedia): <tenant-id>/<model>/<fayl>.
+            // stancl 'tenant_' prefiksini emas, sof subdomain nomini folder qilamiz.
         ],
 
         /**

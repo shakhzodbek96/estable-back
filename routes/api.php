@@ -1,11 +1,14 @@
 <?php
 
 use App\Http\Controllers\Admin\AccessoryController;
+use App\Http\Controllers\Admin\AccessoryImageController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Admin\InventoryController;
+use App\Http\Controllers\Admin\InventoryImageController;
 use App\Http\Controllers\Admin\InvestorController;
 use App\Http\Controllers\Admin\PartnerController;
 use App\Http\Controllers\Admin\ProductController;
+use App\Http\Controllers\Admin\ProductImageController;
 use App\Http\Controllers\Admin\RateController;
 use App\Http\Controllers\Admin\RepairCostController;
 use App\Http\Controllers\Admin\ShopController;
@@ -168,11 +171,19 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::delete('users/{user}', [UserController::class, 'destroy']);
     Route::post('users/{user}/toggle-block', [UserController::class, 'toggleBlock']);
 
+    Route::post('shops/{shop}/image', [ShopController::class, 'uploadImage']);
+    Route::delete('shops/{shop}/image', [ShopController::class, 'deleteImage']);
     Route::apiResource('shops', ShopController::class);
+    Route::post('categories/{category}/image', [CategoryController::class, 'uploadImage']);
+    Route::delete('categories/{category}/image', [CategoryController::class, 'deleteImage']);
     Route::apiResource('categories', CategoryController::class);
+
     Route::post('products/bulk', [ProductController::class, 'bulkStore']);
     Route::post('products/import', [ProductController::class, 'import']);
     Route::get('products/import-template', [ProductController::class, 'importTemplate']);
+    Route::post('products/{product}/images', [ProductImageController::class, 'store']);
+    Route::put('products/{product}/images/{image}/primary', [ProductImageController::class, 'primary']);
+    Route::delete('products/{product}/images/{image}', [ProductImageController::class, 'destroy']);
     Route::apiResource('products', ProductController::class);
     Route::apiResource('investors', InvestorController::class);
     Route::apiResource('partners', PartnerController::class);
@@ -187,6 +198,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('inventories/bulk', [InventoryController::class, 'bulkStore']);
     Route::post('inventories/import', [InventoryController::class, 'import']);
     Route::get('inventories/import-template', [InventoryController::class, 'importTemplate']);
+    Route::post('inventories/{inventory}/images', [InventoryImageController::class, 'store']);
+    Route::put('inventories/{inventory}/images/{image}/primary', [InventoryImageController::class, 'primary']);
+    Route::delete('inventories/{inventory}/images/{image}', [InventoryImageController::class, 'destroy']);
     Route::apiResource('inventories', InventoryController::class);
     Route::get('inventories/{inventory}/repair-costs', [RepairCostController::class, 'index']);
     Route::post('inventories/{inventory}/repair-costs', [RepairCostController::class, 'store']);
@@ -197,6 +211,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('accessories/import', [AccessoryController::class, 'import']);
     Route::get('accessories/import-template', [AccessoryController::class, 'importTemplate']);
     Route::post('accessories/{accessory}/restock', [AccessoryController::class, 'restock']);
+    Route::post('accessories/{accessory}/images', [AccessoryImageController::class, 'store']);
+    Route::put('accessories/{accessory}/images/{image}/primary', [AccessoryImageController::class, 'primary']);
+    Route::delete('accessories/{accessory}/images/{image}', [AccessoryImageController::class, 'destroy']);
     Route::apiResource('accessories', AccessoryController::class);
 });
 
