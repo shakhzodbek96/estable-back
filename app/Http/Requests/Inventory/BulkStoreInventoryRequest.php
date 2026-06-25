@@ -30,10 +30,10 @@ class BulkStoreInventoryRequest extends FormRequest
             'serials.*.extra_serial_number' => ['nullable', 'string', 'max:255'],
             'serials.*.extra_cost' => ['nullable', 'numeric', 'min:0'],
             'serials.*.notes' => ['nullable', 'string', 'max:1000'],
-            // Dinamik xususiyatlar — partiya darajasida (barcha serial'larga umumiy)
-            'custom_attributes' => ['nullable', 'array'],
-            'custom_attributes.*.id' => ['required', 'integer', 'exists:attribute_definitions,id'],
-            'custom_attributes.*.value' => ['nullable'],
+            // Dinamik xususiyatlar — HAR bir serial uchun alohida (IMEI kabi)
+            'serials.*.custom_attributes' => ['nullable', 'array'],
+            'serials.*.custom_attributes.*.id' => ['required', 'integer', 'exists:attribute_definitions,id'],
+            'serials.*.custom_attributes.*.value' => ['nullable'],
         ];
     }
 

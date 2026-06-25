@@ -26,13 +26,13 @@ class InventoryService
         return DB::transaction(function () use ($data) {
             $inventories = collect();
 
-            // Dinamik xususiyatlar partiya darajasida — barcha serial'larga umumiy snapshot
-            $customAttributes = $this->attributes->snapshot($data['custom_attributes'] ?? null, AttributeScope::Serial);
-
             $totalExtraCost = 0;
             foreach ($data['serials'] as $serial) {
                 $serialExtraCost = (float) ($serial['extra_cost'] ?? 0);
                 $totalExtraCost += $serialExtraCost;
+
+                // Dinamik xususiyatlar — har bir serial uchun alohida snapshot
+                $customAttributes = $this->attributes->snapshot($serial['custom_attributes'] ?? null, AttributeScope::Serial);
 
                 $inventories->push(Inventory::create([
                     'product_id' => $data['product_id'],

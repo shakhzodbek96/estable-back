@@ -16,6 +16,9 @@ class Setting extends Model
     // POS sotuvchi skidka limitlari (foizda): ['serial' => ?, 'accessory' => ?]
     public const POS_DISCOUNT_LIMITS = 'pos_discount_limits';
 
+    // Chek (sotuv cheki) konfiguratsiyasi — qaysi maydonlar chiqishi, matnlar
+    public const RECEIPT_CONFIG = 'receipt_config';
+
     protected $fillable = [
         'key',
         'payload',

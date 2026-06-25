@@ -76,6 +76,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // POS skidka limitlari (sotuvchi ham o'qiy oladi — narx chegarasini ko'rsatish uchun)
     Route::get('settings/discount-limits', [SettingController::class, 'discountLimits']);
 
+    // Chek konfiguratsiyasi (POS ham o'qiydi — chek chiqarishда qo'llaydi)
+    Route::get('settings/receipt', [SettingController::class, 'receiptConfig']);
+
     // Sales
     Route::get('sales/search-products', [SaleScanController::class, 'searchProducts']);
     Route::get('sales/scan/{barcode}', [SaleScanController::class, 'scanBarcode']);
@@ -195,6 +198,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
 
     // POS skidka limitlari (faqat admin o'rnatadi)
     Route::put('discount-limits', [SettingController::class, 'updateDiscountLimits']);
+
+    // Chek konfiguratsiyasi (faqat admin o'rnatadi)
+    Route::put('settings/receipt', [SettingController::class, 'updateReceiptConfig']);
 
     // Inventories
     Route::get('inventories/search', [InventoryController::class, 'search']);

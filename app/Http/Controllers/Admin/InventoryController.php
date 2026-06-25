@@ -73,9 +73,15 @@ class InventoryController extends Controller
 
     public function store(StoreInventoryRequest $request): JsonResponse
     {
+        $validated = $request->validated();
         $data = [
-            ...$request->validated(),
-            'serials' => [['serial_number' => $request->serial_number, 'extra_serial_number' => $request->extra_serial_number]],
+            ...$validated,
+            'serials' => [[
+                'serial_number' => $request->serial_number,
+                'extra_serial_number' => $request->extra_serial_number,
+                // Yagona qo'shishda ham xususiyatlar serial ichida (createBatch per-serial o'qiydi)
+                'custom_attributes' => $validated['custom_attributes'] ?? null,
+            ]],
         ];
 
         $inventories = $this->inventoryService->createBatch($data);
