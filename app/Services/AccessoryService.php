@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\AttributeScope;
 use App\Enums\InvestmentType;
 use App\Enums\TransactionType;
 use App\Models\Accessory;
@@ -14,6 +15,10 @@ use Illuminate\Support\Facades\DB;
 
 class AccessoryService
 {
+    public function __construct(
+        private AttributeService $attributes
+    ) {}
+
     /**
      * Bir nechta partiyani bitta so'rov bilan yaratish.
      *
@@ -31,6 +36,9 @@ class AccessoryService
             $accessories = collect();
             $totalCost = 0.0;
 
+            // Dinamik xususiyatlar — barcha partiyalarga umumiy snapshot
+            $customAttributes = $this->attributes->snapshot($data['custom_attributes'] ?? null, AttributeScope::Bulk);
+
             foreach ($data['batches'] as $batch) {
                 $accessory = Accessory::create([
                     // Import — har partiyada o'z product_id; qo'lda bulk — umumiy product_id
@@ -44,6 +52,7 @@ class AccessoryService
                     'sell_price' => $batch['sell_price'],
                     'wholesale_price' => $batch['wholesale_price'] ?? null,
                     'notes' => $batch['notes'] ?? null,
+                    'custom_attributes' => $customAttributes,
                     'shop_id' => $data['shop_id'],
                     'investor_id' => $data['investor_id'] ?? null,
                     'is_active' => true,
@@ -112,6 +121,7 @@ class AccessoryService
                 'sell_price' => $data['sell_price'],
                 'wholesale_price' => $data['wholesale_price'] ?? null,
                 'notes' => $data['notes'] ?? null,
+                'custom_attributes' => $this->attributes->snapshot($data['custom_attributes'] ?? null, AttributeScope::Bulk),
                 'shop_id' => $data['shop_id'],
                 'investor_id' => $data['investor_id'] ?? null,
                 'is_active' => true,
@@ -176,6 +186,11 @@ class AccessoryService
     public function updateItem(Accessory $accessory, array $data): Accessory
     {
         return DB::transaction(function () use ($accessory, $data) {
+            // Client'dan kelgan [{id,value}] ni saqlanadigan snapshot'ga aylantiramiz
+            if (array_key_exists('custom_attributes', $data)) {
+                $data['custom_attributes'] = $this->attributes->snapshot($data['custom_attributes'], AttributeScope::Bulk);
+            }
+
             // Validatsiya: quantity'ni sold+consigned dan kam qilib bo'lmaydi
             if (isset($data['quantity'])) {
                 $min = $accessory->sold_quantity + $accessory->consigned_quantity;

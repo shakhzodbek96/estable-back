@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\AttributeScope;
 use App\Enums\InventoryStatus;
 use App\Enums\InvestmentType;
 use App\Enums\TransactionType;
@@ -16,10 +17,17 @@ use Illuminate\Support\Facades\DB;
 
 class InventoryService
 {
+    public function __construct(
+        private AttributeService $attributes
+    ) {}
+
     public function createBatch(array $data): Collection
     {
         return DB::transaction(function () use ($data) {
             $inventories = collect();
+
+            // Dinamik xususiyatlar partiya darajasida — barcha serial'larga umumiy snapshot
+            $customAttributes = $this->attributes->snapshot($data['custom_attributes'] ?? null, AttributeScope::Serial);
 
             $totalExtraCost = 0;
             foreach ($data['serials'] as $serial) {
@@ -38,6 +46,7 @@ class InventoryService
                     'has_box' => $data['has_box'] ?? true,
                     'state' => $data['state'] ?? 'new',
                     'notes' => $serial['notes'] ?? ($data['notes'] ?? null),
+                    'custom_attributes' => $customAttributes,
                     'shop_id' => $data['shop_id'],
                     'investor_id' => $data['investor_id'] ?? null,
                     'created_by' => auth()->id(),
@@ -105,6 +114,11 @@ class InventoryService
     public function updateItem(Inventory $inventory, array $data): Inventory
     {
         return DB::transaction(function () use ($inventory, $data) {
+            // Client'dan kelgan [{id,value}] ni saqlanadigan snapshot'ga aylantiramiz
+            if (array_key_exists('custom_attributes', $data)) {
+                $data['custom_attributes'] = $this->attributes->snapshot($data['custom_attributes'], AttributeScope::Serial);
+            }
+
             $oldContribution = (float) $inventory->purchase_price + (float) $inventory->extra_cost;
 
             $inventory->update($data);

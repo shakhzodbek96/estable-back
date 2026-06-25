@@ -27,6 +27,9 @@ class UpdateInventoryRequest extends FormRequest
             'has_box' => ['sometimes', 'boolean'],
             'state' => ['sometimes', 'string', 'in:new,used'],
             'notes' => ['nullable', 'string'],
+            'custom_attributes' => ['nullable', 'array'],
+            'custom_attributes.*.id' => ['required', 'integer', 'exists:attribute_definitions,id'],
+            'custom_attributes.*.value' => ['nullable'],
         ];
     }
 }

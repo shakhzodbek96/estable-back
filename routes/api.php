@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\AccessoryController;
 use App\Http\Controllers\Admin\AccessoryImageController;
+use App\Http\Controllers\Admin\AttributeDefinitionController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Admin\InventoryController;
 use App\Http\Controllers\Admin\InventoryImageController;
@@ -177,6 +178,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::post('categories/{category}/image', [CategoryController::class, 'uploadImage']);
     Route::delete('categories/{category}/image', [CategoryController::class, 'deleteImage']);
     Route::apiResource('categories', CategoryController::class);
+
+    // Dinamik tovar xususiyatlari (atribut ta'riflari) — reusable
+    Route::apiResource('attribute-definitions', AttributeDefinitionController::class);
 
     Route::post('products/bulk', [ProductController::class, 'bulkStore']);
     Route::post('products/import', [ProductController::class, 'import']);

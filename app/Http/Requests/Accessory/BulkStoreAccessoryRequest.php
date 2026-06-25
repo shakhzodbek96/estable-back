@@ -50,6 +50,10 @@ class BulkStoreAccessoryRequest extends FormRequest
             'batches.*.sell_price' => ['required', 'numeric', 'min:0'],
             'batches.*.wholesale_price' => ['nullable', 'numeric', 'min:0'],
             'batches.*.notes' => ['nullable', 'string', 'max:1000'],
+            // Dinamik xususiyatlar — barcha partiyalarga umumiy
+            'custom_attributes' => ['nullable', 'array'],
+            'custom_attributes.*.id' => ['required', 'integer', 'exists:attribute_definitions,id'],
+            'custom_attributes.*.value' => ['nullable'],
         ];
     }
 

@@ -32,6 +32,9 @@ class StoreAccessoryRequest extends FormRequest
             'notes' => ['nullable', 'string'],
             'shop_id' => ['required', 'integer', 'exists:shops,id'],
             'investor_id' => ['nullable', 'integer', 'exists:investors,id'],
+            'custom_attributes' => ['nullable', 'array'],
+            'custom_attributes.*.id' => ['required', 'integer', 'exists:attribute_definitions,id'],
+            'custom_attributes.*.value' => ['nullable'],
         ];
     }
 

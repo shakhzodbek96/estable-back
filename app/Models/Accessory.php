@@ -22,6 +22,7 @@ class Accessory extends Model
         'sell_price',
         'wholesale_price',
         'notes',
+        'custom_attributes',
         'consignment_item_id',
         'shop_id',
         'investor_id',
@@ -36,6 +37,7 @@ class Accessory extends Model
             'sell_price' => 'decimal:2',
             'wholesale_price' => 'decimal:2',
             'is_active' => 'boolean',
+            'custom_attributes' => 'array',
         ];
     }
 

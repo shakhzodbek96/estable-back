@@ -28,6 +28,7 @@ class Inventory extends Model
         'has_box',
         'notes',
         'state',
+        'custom_attributes',
         'consignment_item_id',
         'shop_id',
         'investor_id',
@@ -45,6 +46,7 @@ class Inventory extends Model
             'sold_at' => 'datetime',
             'has_box' => 'boolean',
             'status' => InventoryStatus::class,
+            'custom_attributes' => 'array',
         ];
     }
 

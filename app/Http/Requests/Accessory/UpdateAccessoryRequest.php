@@ -22,6 +22,9 @@ class UpdateAccessoryRequest extends FormRequest
             'wholesale_price' => ['nullable', 'numeric', 'min:0'],
             'notes' => ['nullable', 'string'],
             'is_active' => ['sometimes', 'boolean'],
+            'custom_attributes' => ['nullable', 'array'],
+            'custom_attributes.*.id' => ['required', 'integer', 'exists:attribute_definitions,id'],
+            'custom_attributes.*.value' => ['nullable'],
         ];
     }
 }
