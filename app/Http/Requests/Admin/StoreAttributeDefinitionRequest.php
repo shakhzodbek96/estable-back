@@ -26,6 +26,7 @@ class StoreAttributeDefinitionRequest extends FormRequest
             ],
             'icon' => ['nullable', 'string', 'max:50'],
             'icon_color' => ['nullable', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
+            'show_on_label' => ['sometimes', 'boolean'],
             'type' => ['required', new Enum(AttributeType::class)],
             'applies_to' => ['required', new Enum(AttributeScope::class)],
             'options' => ['nullable', 'array', 'required_if:type,select'],

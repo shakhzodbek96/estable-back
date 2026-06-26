@@ -220,32 +220,6 @@ class ReturnService
     }
 
     /**
-     * Tuzatishga yuborish
-     */
-    public function sendToRepair(Inventory $inventory): Inventory
-    {
-        if ($inventory->status !== InventoryStatus::Returned) {
-            throw new \Exception("Faqat 'returned' statusdagi tovarni tuzatishga yuborish mumkin");
-        }
-
-        $inventory->update(['status' => InventoryStatus::InRepair]);
-        return $inventory;
-    }
-
-    /**
-     * Tuzatishdan qaytarish
-     */
-    public function returnFromRepair(Inventory $inventory): Inventory
-    {
-        if ($inventory->status !== InventoryStatus::InRepair) {
-            throw new \Exception("Tovar tuzatishda emas");
-        }
-
-        $inventory->update(['status' => InventoryStatus::InStock]);
-        return $inventory;
-    }
-
-    /**
      * Hisobdan chiqarish
      */
     public function writeOff(Inventory $inventory, string $reason): Inventory

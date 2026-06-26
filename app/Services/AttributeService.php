@@ -17,7 +17,7 @@ class AttributeService
      * select uchun ro'yxatda yo'q qiymat) elementlar tashlab yuboriladi.
      *
      * @param  array<int, array{id?: mixed, value?: mixed}>|null  $items
-     * @return array<int, array{id:int, name:string, icon:?string, icon_color:?string, type:string, value:mixed}>|null
+     * @return array<int, array{id:int, name:string, icon:?string, icon_color:?string, unit:?string, type:string, show_on_label:bool, value:mixed}>|null
      */
     public function snapshot(?array $items, AttributeScope $scope): ?array
     {
@@ -66,7 +66,9 @@ class AttributeService
                 'name' => $def->name,
                 'icon' => $def->icon,
                 'icon_color' => $def->icon_color,
+                'unit' => $def->unit,
                 'type' => $def->type->value,
+                'show_on_label' => (bool) $def->show_on_label,
                 'value' => $value,
             ];
         }

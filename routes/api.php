@@ -15,6 +15,7 @@ use App\Http\Controllers\Admin\RepairCostController;
 use App\Http\Controllers\Admin\ShopController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\DebtContactController;
 use App\Http\Controllers\Api\QuickCustomerController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\SalePaymentController;
@@ -100,6 +101,13 @@ Route::middleware(['auth:sanctum', 'role:admin,manager'])->group(function () {
 
 // Admin/Manager — to'lovlarni boshqarish
 Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
+    // Qarz daftari (Долги) — loyihaning qolgan qismidan mustaqil, owner uchun
+    Route::get('debts/summary', [DebtContactController::class, 'summary']);
+    Route::apiResource('debts', DebtContactController::class);
+    Route::post('debts/{debt}/entries', [DebtContactController::class, 'addEntry']);
+    Route::put('debt-entries/{debtEntry}', [DebtContactController::class, 'updateEntry']);
+    Route::delete('debt-entries/{debtEntry}', [DebtContactController::class, 'deleteEntry']);
+
     Route::get('sale-payments/pending', [SalePaymentController::class, 'pending']);
     Route::get('sale-payments/summary', [SalePaymentController::class, 'summary']);
     Route::post('sale-payments/bulk-accept', [SalePaymentController::class, 'bulkAccept']);
@@ -128,8 +136,6 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::post('returns/{return}/reject', [ReturnController::class, 'reject']);
 
     // Inventory status changes
-    Route::post('inventories/{inventory}/send-to-repair', [InventoryStatusController::class, 'sendToRepair']);
-    Route::post('inventories/{inventory}/return-from-repair', [InventoryStatusController::class, 'returnFromRepair']);
     Route::post('inventories/{inventory}/write-off', [InventoryStatusController::class, 'writeOff']);
 
     // Transactions

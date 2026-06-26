@@ -309,12 +309,13 @@ class InventoryService
 
     public function addRepairCost(Inventory $inventory, array $data): RepairCost
     {
-        // Remont xarajatini faqat «ta'mirda» turgan tovarga qo'shish mumkin — aks holda
-        // yopilgan sotuvning COGS'i (extra_cost) retroaktiv buzilardi va investor balansi
-        // hech qanday asossiz kamayardi (sendToRepair/returnFromRepair guard'lariga monand).
-        if ($inventory->status !== InventoryStatus::InRepair) {
+        // Remont xarajatini faqat skladdagi (in_stock) tovarga qo'shish mumkin — aks holda
+        // yopilgan/sotilgan sotuvning COGS'i (extra_cost) retroaktiv buzilardi va investor
+        // balansi asossiz kamayardi. Alohida «ta'mirda» statusi endi yo'q — remont xarajati
+        // shunchaki skladdagi tovarga yoziladi (tannarx + sotuv narxi oshadi).
+        if ($inventory->status !== InventoryStatus::InStock) {
             throw new \InvalidArgumentException(
-                'Ремонтные расходы можно добавить только товару в статусе «в ремонте».'
+                'Ремонтные расходы можно добавить только товару на складе.'
             );
         }
 
@@ -329,7 +330,15 @@ class InventoryService
                 'created_by' => auth()->id(),
             ]);
 
-            $inventory->increment('extra_cost', $data['amount']);
+            // Tannarx (extra_cost) VA sotuv narxlari aynan remont summasiga oshadi —
+            // mijoz remontni qoplaydi, absolyut marja saqlanadi.
+            $amount = (float) $data['amount'];
+            $inventory->extra_cost = (float) $inventory->extra_cost + $amount;
+            $inventory->selling_price = (float) $inventory->selling_price + $amount;
+            if ($inventory->wholesale_price !== null) {
+                $inventory->wholesale_price = (float) $inventory->wholesale_price + $amount;
+            }
+            $inventory->save();
 
             $rate = Rate::current();
 

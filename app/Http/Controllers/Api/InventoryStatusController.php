@@ -14,26 +14,6 @@ class InventoryStatusController extends Controller
         private ReturnService $service
     ) {}
 
-    public function sendToRepair(Inventory $inventory): JsonResponse
-    {
-        try {
-            $result = $this->service->sendToRepair($inventory);
-            return response()->json($result->load('product:id,name'));
-        } catch (\Exception $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
-    }
-
-    public function returnFromRepair(Inventory $inventory): JsonResponse
-    {
-        try {
-            $result = $this->service->returnFromRepair($inventory);
-            return response()->json($result->load('product:id,name'));
-        } catch (\Exception $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
-        }
-    }
-
     public function writeOff(Request $request, Inventory $inventory): JsonResponse
     {
         $request->validate(['reason' => 'required|string|max:500']);

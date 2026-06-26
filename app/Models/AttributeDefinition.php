@@ -26,6 +26,7 @@ class AttributeDefinition extends Model
         'options',
         'unit',
         'applies_to',
+        'show_on_label',
         'is_active',
         'sort_order',
     ];
@@ -36,6 +37,7 @@ class AttributeDefinition extends Model
             'type' => AttributeType::class,
             'applies_to' => AttributeScope::class,
             'options' => 'array',
+            'show_on_label' => 'boolean',
             'is_active' => 'boolean',
             'sort_order' => 'integer',
         ];
