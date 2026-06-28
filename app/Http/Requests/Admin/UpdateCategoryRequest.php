@@ -25,6 +25,7 @@ class UpdateCategoryRequest extends FormRequest
                 Rule::unique('categories', 'name')->ignore($categoryId),
             ],
             'description' => ['nullable', 'string'],
+            'icon' => ['nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
         ];
     }

@@ -30,6 +30,7 @@ use App\Http\Controllers\Api\ConsignmentController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\Api\InvestmentController;
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\Public\CatalogController;
 use App\Http\Middleware\InitializeTenancyByOriginHeader;
 use Illuminate\Support\Facades\Route;
 
@@ -58,6 +59,17 @@ Route::middleware([
     InitializeTenancyByOriginHeader::class,
 ])->group(function () {
 
+// ── Public katalog (mijozlar uchun — AUTH talab qilinmaydi) ──────────────
+// Tenant Origin orqali aniqlanadi; faqat xavfsiz (sotuv narxi, mavjudlik,
+// rasm, kategoriya) maydonlar qaytariladi.
+Route::prefix('catalog')->group(function () {
+    Route::get('store', [CatalogController::class, 'store']);
+    Route::get('shops', [CatalogController::class, 'shops']);
+    Route::get('categories', [CatalogController::class, 'categories']);
+    Route::get('products', [CatalogController::class, 'index']);
+    Route::get('products/{product}', [CatalogController::class, 'show']);
+});
+
 Route::prefix('auth')->group(function () {
     Route::post('login', [AuthController::class, 'login']);
 
@@ -79,6 +91,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Chek konfiguratsiyasi (POS ham o'qiydi — chek chiqarishда qo'llaydi)
     Route::get('settings/receipt', [SettingController::class, 'receiptConfig']);
+
+    // Do'kon ma'lumoti (admin sozlamalar formasi o'qiydi)
+    Route::get('settings/store-info', [SettingController::class, 'storeInfo']);
 
     // Sales
     Route::get('sales/search-products', [SaleScanController::class, 'searchProducts']);
@@ -207,6 +222,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
 
     // Chek konfiguratsiyasi (faqat admin o'rnatadi)
     Route::put('settings/receipt', [SettingController::class, 'updateReceiptConfig']);
+
+    // Do'kon ma'lumoti (faqat admin o'rnatadi)
+    Route::put('settings/store-info', [SettingController::class, 'updateStoreInfo']);
 
     // Inventories
     Route::get('inventories/search', [InventoryController::class, 'search']);

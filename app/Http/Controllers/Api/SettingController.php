@@ -83,6 +83,65 @@ class SettingController extends Controller
         return response()->json($payload);
     }
 
+    /**
+     * Public landing uchun do'kon ma'lumoti (about + aloqa).
+     * GET — admin sozlamalar formasi o'qiydi (public landing /catalog/store orqali oladi).
+     */
+    public function storeInfo(): JsonResponse
+    {
+        return response()->json($this->normalizeStoreInfo(
+            Setting::getValue(Setting::STORE_INFO, [])
+        ));
+    }
+
+    /** Do'kon ma'lumotini yangilash (faqat admin). */
+    public function updateStoreInfo(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['nullable', 'string', 'max:80'],
+            'about' => ['nullable', 'string', 'max:2000'],
+            'phone' => ['nullable', 'string', 'max:40'],
+            'telegram' => ['nullable', 'string', 'max:100'],
+            'instagram' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $payload = $this->normalizeStoreInfo($data);
+        Setting::setValue(Setting::STORE_INFO, $payload);
+
+        return response()->json($payload);
+    }
+
+    /** Do'kon ma'lumoti standart qiymatlari */
+    private function defaultStoreInfo(): array
+    {
+        return [
+            'name' => '',
+            'about' => '',
+            'phone' => '',
+            'telegram' => '',
+            'instagram' => '',
+        ];
+    }
+
+    /** Payload'ni to'liq, tipi to'g'ri do'kon-ma'lumot shakliga keltiradi */
+    private function normalizeStoreInfo(mixed $payload): array
+    {
+        $d = $this->defaultStoreInfo();
+        $p = is_array($payload) ? $payload : [];
+
+        $str = static fn (string $k, int $max): string => isset($p[$k]) && is_string($p[$k])
+            ? mb_substr(trim($p[$k]), 0, $max)
+            : $d[$k];
+
+        return [
+            'name' => $str('name', 80),
+            'about' => $str('about', 2000),
+            'phone' => $str('phone', 40),
+            'telegram' => $str('telegram', 100),
+            'instagram' => $str('instagram', 100),
+        ];
+    }
+
     /** Chek konfiguratsiyasi standart qiymatlari */
     private function defaultReceiptConfig(): array
     {

@@ -19,6 +19,9 @@ class Setting extends Model
     // Chek (sotuv cheki) konfiguratsiyasi — qaysi maydonlar chiqishi, matnlar
     public const RECEIPT_CONFIG = 'receipt_config';
 
+    // Public landing uchun do'kon ma'lumoti: ['name', 'about', 'phone', 'telegram', 'instagram']
+    public const STORE_INFO = 'store_info';
+
     protected $fillable = [
         'key',
         'payload',
