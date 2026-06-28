@@ -108,8 +108,83 @@ class CatalogController extends Controller
         $data = $this->present($product, $main);
         $data['category_description'] = $product->category?->description;
         $data['images'] = $images->values();
+        $data['specs'] = $this->stockSpecs($product);
+        $data['stores'] = $this->storeAvailability($product);
 
         return response()->json($data);
+    }
+
+    /**
+     * Tovarga qo'shilgan qo'shimcha xarakteristikalar (custom_attributes) — vakil
+     * bor zaxira birligidan. Snapshot allaqachon o'zini tavsiflaydi (name/unit/type/icon).
+     *
+     * @return array<int,array{name:string,value:mixed,unit:?string,icon:?string,icon_color:?string}>
+     */
+    private function stockSpecs(Product $product): array
+    {
+        $unit = $product->type === ProductType::Bulk
+            ? Accessory::query()
+                ->where('product_id', $product->id)
+                ->where('is_active', true)
+                ->whereRaw('(quantity - sold_quantity - consigned_quantity) > 0')
+                ->whereNotNull('custom_attributes')
+                ->orderBy('id')
+                ->first()
+            : Inventory::query()
+                ->where('product_id', $product->id)
+                ->where('status', InventoryStatus::InStock->value)
+                ->whereNotNull('custom_attributes')
+                ->orderBy('id')
+                ->first();
+
+        $attrs = $unit?->custom_attributes;
+        if (! is_array($attrs)) {
+            return [];
+        }
+
+        return collect($attrs)
+            ->filter(fn ($a) => isset($a['value']) && $a['value'] !== '' && $a['value'] !== null)
+            ->map(fn ($a) => [
+                'name' => $a['name'] ?? '',
+                'value' => ($a['type'] ?? null) === 'boolean' ? (($a['value']) ? 'Да' : 'Нет') : $a['value'],
+                'unit' => $a['unit'] ?? null,
+                'icon' => $a['icon'] ?? null,
+                'icon_color' => $a['icon_color'] ?? null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Tovar bo'yicha har do'kondagi mavjud qoldiq ("Наличие в магазинах").
+     * Barcha do'konlar qaytadi (qoldig'i 0 bo'lganlar ham — "Под заказ" uchun).
+     *
+     * @return array<int,array{id:int,name:string,available:int}>
+     */
+    private function storeAvailability(Product $product): array
+    {
+        $shops = Shop::query()->orderBy('name')->get(['id', 'name']);
+
+        $serial = DB::table('inventories')
+            ->where('product_id', $product->id)
+            ->where('status', InventoryStatus::InStock->value)
+            ->groupBy('shop_id')
+            ->selectRaw('shop_id, COUNT(*) AS c')
+            ->pluck('c', 'shop_id');
+
+        $bulk = DB::table('accessories')
+            ->where('product_id', $product->id)
+            ->where('is_active', true)
+            ->whereRaw('(quantity - sold_quantity - consigned_quantity) > 0')
+            ->groupBy('shop_id')
+            ->selectRaw('shop_id, SUM(quantity - sold_quantity - consigned_quantity) AS c')
+            ->pluck('c', 'shop_id');
+
+        return $shops->map(fn ($s) => [
+            'id' => $s->id,
+            'name' => $s->name,
+            'available' => (int) (($serial[$s->id] ?? 0) + ($bulk[$s->id] ?? 0)),
+        ])->values()->all();
     }
 
     /** Faol kategoriyalar + ikon + har biridagi "bor" tovarlar soni (filtr chiplari uchun). */

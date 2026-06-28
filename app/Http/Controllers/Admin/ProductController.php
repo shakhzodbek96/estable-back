@@ -18,22 +18,38 @@ class ProductController extends Controller
     {
         $query = Product::query()->with(['category:id,name', 'images']);
 
-        if ($search = $request->string('search')->trim()->value()) {
-            $query->where('name', 'ilike', "%{$search}%");
-        }
-
-        if ($categoryId = $request->integer('category_id')) {
-            $query->where('category_id', $categoryId);
-        }
-
-        if ($type = $request->string('type')->trim()->value()) {
-            $query->where('type', $type);
-        }
+        $this->applyFilters(
+            $query,
+            $request->string('search')->trim()->value(),
+            $request->query('category_id'),
+            $request->string('type')->trim()->value()
+        );
 
         $perPage = (int) $request->integer('per_page', 15);
         $perPage = max(1, min($perPage, 100));
 
         return response()->json($query->orderByDesc('id')->paginate($perPage));
+    }
+
+    /**
+     * Mahsulot ro'yxati filtrlari — index VA bulkUpdateCategory (all_matching) uchun umumiy.
+     * $category: int (kategoriya), 'none' (kategoriyasiz), yoki bo'sh (barchasi).
+     */
+    private function applyFilters($query, ?string $search, $category, ?string $type): void
+    {
+        if ($search) {
+            $query->where('name', 'ilike', "%{$search}%");
+        }
+
+        if ($category === 'none') {
+            $query->whereNull('category_id');
+        } elseif (is_numeric($category) && (int) $category > 0) {
+            $query->where('category_id', (int) $category);
+        }
+
+        if (in_array($type, ['serial', 'bulk'], true)) {
+            $query->where('type', $type);
+        }
     }
 
     public function store(StoreProductRequest $request): JsonResponse
@@ -78,6 +94,48 @@ class ProductController extends Controller
         $product->delete();
 
         return response()->json(['message' => 'Deleted']);
+    }
+
+    /**
+     * Tanlangan mahsulotlarning kategoriyasini ommaviy o'zgartirish.
+     *
+     * Ikki rejim:
+     *   - ID bo'yicha:   { ids: [1,2,3], category_id: number|null }
+     *   - Filtr bo'yicha: { all_matching: true, category_id: number|null,
+     *                       filters: { search?, type?, category_id? ('none'|int) } }
+     *
+     * `category_id` — yangi (maqsad) kategoriya; `filters.category_id` — qidiruv filtri.
+     */
+    public function bulkUpdateCategory(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'category_id' => ['nullable', 'integer', 'exists:categories,id'],
+            'all_matching' => ['sometimes', 'boolean'],
+            'ids' => ['required_without:all_matching', 'array', 'min:1', 'max:5000'],
+            'ids.*' => ['integer', 'exists:products,id'],
+            'filters' => ['sometimes', 'array'],
+            'filters.search' => ['nullable', 'string', 'max:255'],
+            'filters.type' => ['nullable', 'in:serial,bulk'],
+            'filters.category_id' => ['nullable'],
+        ]);
+
+        $query = Product::query();
+
+        if ($request->boolean('all_matching')) {
+            $f = $data['filters'] ?? [];
+            $this->applyFilters(
+                $query,
+                isset($f['search']) ? trim((string) $f['search']) : null,
+                $f['category_id'] ?? null,
+                $f['type'] ?? null
+            );
+        } else {
+            $query->whereIn('id', $data['ids']);
+        }
+
+        $updated = $query->update(['category_id' => $data['category_id'] ?? null]);
+
+        return response()->json(['updated' => $updated]);
     }
 
     /**

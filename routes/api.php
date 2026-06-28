@@ -207,6 +207,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::apiResource('attribute-definitions', AttributeDefinitionController::class);
 
     Route::post('products/bulk', [ProductController::class, 'bulkStore']);
+    Route::post('products/bulk-update-category', [ProductController::class, 'bulkUpdateCategory']);
     Route::post('products/import', [ProductController::class, 'import']);
     Route::get('products/import-template', [ProductController::class, 'importTemplate']);
     Route::post('products/{product}/images', [ProductImageController::class, 'store']);
