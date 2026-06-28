@@ -16,6 +16,7 @@ use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -216,6 +217,44 @@ class CatalogController extends Controller
         return response()->json([
             'categories' => $cats,
             'total' => $total,
+        ]);
+    }
+
+    /** Umumiy sonlar keshi kaliti (vaqt bo'yicha — 4 soat). */
+    public const CACHE_TOTALS = 'catalog.stats.totals';
+
+    /**
+     * "Sotuvda bor" tovarlar soni keshi kaliti.
+     * Zaxira (Inventory/Accessory) o'zgarganда AppServiceProvider keshni tozalaydi.
+     */
+    public const CACHE_IN_STOCK = 'catalog.stats.in_stock';
+
+    /**
+     * Katalog statistikasi ("О нас" bloki uchun): jami tovarlar, sotuvdagi tovarlar,
+     * filiallar soni. DB ga ortiqcha yuk bermaslik uchun keshlanadi.
+     *
+     * - Umumiy sonlar (jami tovar/filial) kam o'zgaradi — VAQT bo'yicha keshlash yetarli (4 soat).
+     * - "Sotuvda bor" soni zaxiraga bog'liq — INVALIDATSIYA orqali yangilanadi (zaxira
+     *   o'zgarganда kesh tozalanadi), TTL faqat fallback sifatida (12 soat).
+     *
+     * Kesh stancl tomonidan avto tenant-aware (har tenant uchun alohida kalit).
+     */
+    public function stats(): JsonResponse
+    {
+        $totals = Cache::remember(self::CACHE_TOTALS, now()->addHours(4), fn (): array => [
+            'products' => (int) DB::table('products')->count(),
+            'shops' => (int) DB::table('shops')->count(),
+        ]);
+
+        $inStock = Cache::remember(self::CACHE_IN_STOCK, now()->addHours(12), fn (): int => (int) DB::table('products')
+            ->leftJoinSub($this->availabilitySub(), 'stock', 'stock.product_id', '=', 'products.id')
+            ->where('stock.available', '>', 0)
+            ->count());
+
+        return response()->json([
+            'products' => $totals['products'],
+            'products_in_stock' => (int) $inStock,
+            'shops' => $totals['shops'],
         ]);
     }
 

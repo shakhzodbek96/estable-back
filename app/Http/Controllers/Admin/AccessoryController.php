@@ -35,6 +35,12 @@ class AccessoryController extends Controller
             $query->where('barcode', 'ilike', "%{$barcode}%");
         }
 
+        if ($productSearch = $request->string('product_search')->trim()->value()) {
+            $query->whereHas('product', function ($q) use ($productSearch) {
+                $q->where('name', 'ilike', "%{$productSearch}%");
+            });
+        }
+
         if ($request->filled('is_active')) {
             $query->where('is_active', $request->boolean('is_active'));
         }

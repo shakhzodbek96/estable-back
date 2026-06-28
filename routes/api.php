@@ -64,6 +64,7 @@ Route::middleware([
 // rasm, kategoriya) maydonlar qaytariladi.
 Route::prefix('catalog')->group(function () {
     Route::get('store', [CatalogController::class, 'store']);
+    Route::get('stats', [CatalogController::class, 'stats']);
     Route::get('shops', [CatalogController::class, 'shops']);
     Route::get('categories', [CatalogController::class, 'categories']);
     Route::get('products', [CatalogController::class, 'index']);
