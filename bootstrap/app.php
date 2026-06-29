@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Stancl\Tenancy\Exceptions\TenantCouldNotBeIdentifiedOnDomainException;
 use Stancl\Tenancy\Exceptions\TenantCouldNotBeIdentifiedById;
+use Throwable;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -53,6 +54,17 @@ return Application::configure(basePath: dirname(__DIR__))
         );
     })
     ->withExceptions(function (Exceptions $exceptions) {
+        /**
+         * API har doim JSON qaytarsin. Standart Laravel faqat `Accept: application/json`
+         * header bo'lsa JSON beradi; aks holda HTML xato sahifasi chiqaradi. Biz `api/*`
+         * (jumladan `api/central/*`) so'rovlari uchun har doim JSON majburlaymiz — 404,
+         * 405, 419, 422 (validatsiya), 500, 503 (maintenance) — barchasi JSON bo'ladi.
+         * Boshqa (brauzer) so'rovlar esa odatdagidek HTML error sahifasini ko'radi.
+         */
+        $exceptions->shouldRenderJsonWhen(
+            fn (Request $request, Throwable $e): bool => $request->is('api/*') || $request->expectsJson()
+        );
+
         /**
          * Tenant topilmasa: frontend subdomain'i domains jadvalida yo'q
          * yoki tenant arxivlangan. 404 JSON javob qaytaramiz — brauzerga
