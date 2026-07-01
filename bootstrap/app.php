@@ -7,7 +7,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Stancl\Tenancy\Exceptions\TenantCouldNotBeIdentifiedOnDomainException;
 use Stancl\Tenancy\Exceptions\TenantCouldNotBeIdentifiedById;
-use Throwable;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -62,7 +61,7 @@ return Application::configure(basePath: dirname(__DIR__))
          * Boshqa (brauzer) so'rovlar esa odatdagidek HTML error sahifasini ko'radi.
          */
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request, Throwable $e): bool => $request->is('api/*') || $request->expectsJson()
+            fn (Request $request, \Throwable $e): bool => $request->is('api/*') || $request->expectsJson()
         );
 
         /**
