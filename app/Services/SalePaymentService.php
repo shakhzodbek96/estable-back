@@ -126,24 +126,66 @@ class SalePaymentService
             'checked_by' => auth()->id(),
         ]);
 
-        if ($payment->investor_id) {
-            Investment::create([
-                'investor_id' => $payment->investor_id,
-                'transaction_id' => $transaction->id,
-                'type' => InvestmentType::ClientsPayment,
-                'is_credit' => true,
-                'amount' => round($amountUsd, 2),
-                'rate' => $payment->rate,
-                'comment' => "Sotuv #{$payment->sale_id} to'lovi",
-                'created_by' => auth()->id(),
-            ]);
+        // Investor mablag'ini item darajasida taqsimlaymiz: sotuvda bir necha investor
+        // (yoki investor+do'kon) tovari bo'lishi mumkin. Har investor o'z tovarlari SUBTOTAL
+        // ulushiga proportsional kreditlanadi. Do'kon (investor_id=null) tovari ulushi
+        // kreditlanmaydi. Yagona-investor holatida ulush = 100% → to'liq summa (regressiyasiz).
+        $shares = $this->investorSharesUsd($payment->sale);
+        $saleTotal = (float) $payment->sale->total_price;
 
-            Investor::where('id', $payment->investor_id)
-                ->lockForUpdate()
-                ->increment('balance', round($amountUsd, 2));
+        if (!empty($shares) && $saleTotal > 0) {
+            foreach ($shares as $investorId => $subtotalUsd) {
+                $credit = round($amountUsd * ($subtotalUsd / $saleTotal), 2);
+                if ($credit <= 0) {
+                    continue;
+                }
+
+                Investment::create([
+                    'investor_id' => $investorId,
+                    'transaction_id' => $transaction->id,
+                    'type' => InvestmentType::ClientsPayment,
+                    'is_credit' => true,
+                    'amount' => $credit,
+                    'rate' => $payment->rate,
+                    'comment' => "Sotuv #{$payment->sale_id} to'lovi",
+                    'created_by' => auth()->id(),
+                ]);
+
+                Investor::where('id', $investorId)
+                    ->lockForUpdate()
+                    ->increment('balance', $credit);
+            }
         }
 
         return $payment->fresh(['sale', 'transaction', 'creator:id,name', 'checker:id,name']);
+    }
+
+    /**
+     * Sotuvdagi har investor uchun uning tovarlari SUBTOTAL yig'indisi (USD).
+     * Do'kon egaligidagi (investor_id=null) tovarlar kiritilmaydi.
+     *
+     * @return array<int, float>  [investor_id => subtotal_usd]
+     */
+    private function investorSharesUsd(Sale $sale): array
+    {
+        $items = $sale->items()
+            ->with(['inventory:id,investor_id', 'accessory:id,investor_id'])
+            ->get();
+
+        $shares = [];
+        foreach ($items as $item) {
+            $investorId = $item->item_type->value === 'serial'
+                ? $item->inventory?->investor_id
+                : $item->accessory?->investor_id;
+
+            if ($investorId === null) {
+                continue; // do'kon mablag'i — kreditlanmaydi
+            }
+
+            $shares[$investorId] = ($shares[$investorId] ?? 0.0) + (float) $item->subtotal;
+        }
+
+        return $shares;
     }
 
     /**

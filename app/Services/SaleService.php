@@ -290,11 +290,14 @@ class SaleService
     }
 
     /**
-     * Sotuvning egasini (investor yoki do'kon) aniqlaydi.
+     * Sotuvning egasini (investor yoki do'kon) aniqlaydi — DENORMALIZATSIYA uchun.
      *
-     * Sotuv BITTA egaga tegishli bo'lishi SHART: investor sotuvning TO'LIQ tushumini oladi,
-     * shuning uchun bir savatda turli egalar (ikki investor, yoki investor+do'kon) tovarlari
-     * bo'lsa hisob-kitob noaniq bo'lardi — bunday holatda xato (determineShop kabi).
+     * Bir savatda turli egalar (bir necha investor yoki investor+do'kon) tovarlari bo'lishi
+     * MUMKIN (bitta do'kon doirasida — determineShop cheklaydi). Bunday aralash sotuvda
+     * `sales.investor_id` = null bo'ladi; haqiqiy hisob-kitob (mablag' qaytishi + foyda)
+     * item darajasida, har egа ulushiga qarab taqsimlanadi
+     * (SalePaymentService::acceptPaymentRecord). Bu ustun endi faqat yagona-investor
+     * sotuvlar uchun ma'lumot/qulaylik sifatida saqlanadi.
      */
     private function determineInvestor(array $items): ?int
     {
@@ -316,11 +319,12 @@ class SaleService
         // null (do'kon mablag'i) ni alohida ega sifatida qaraymiz
         $distinct = $owners->map(fn ($v) => $v === null ? 'shop' : (int) $v)->unique()->values();
 
-        if ($distinct->count() > 1) {
-            throw new \Exception('В корзине товары разных владельцев (инвестор/магазин). Оформите отдельными продажами.');
+        // Aralash yoki do'kon egaligi → null. Faqat yagona investor bo'lsa uni yozamiz.
+        if ($distinct->count() !== 1) {
+            return null;
         }
 
         $only = $distinct->first();
-        return ($only === null || $only === 'shop') ? null : (int) $only;
+        return $only === 'shop' ? null : (int) $only;
     }
 }

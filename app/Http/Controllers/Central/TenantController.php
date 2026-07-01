@@ -80,9 +80,18 @@ class TenantController extends Controller
             $query->where('plan', $plan);
         }
 
-        return response()->json(
-            $query->orderByDesc('created_at')->paginate((int) $request->query('per_page', 15))
-        );
+        $paginated = $query->orderByDesc('created_at')
+            ->paginate((int) $request->query('per_page', 15));
+
+        // Har tenant uchun skladdagi tovar sonini (Inventory + Accessory)
+        // qo'shamiz — adminkada tenant faolligini baholash uchun. Har biri
+        // uchun tenant schema'siga o'tiladi, shu sabab natijani massivga
+        // aylantirib qo'shimcha maydon sifatida qaytaramiz.
+        $paginated->through(fn (Tenant $tenant) => array_merge($tenant->toArray(), [
+            'stock_count' => $this->tenantStockCount($tenant),
+        ]));
+
+        return response()->json($paginated);
     }
 
     public function show(string $id): JsonResponse
@@ -92,7 +101,26 @@ class TenantController extends Controller
             'createdByAdmin:id,name,username',
         ])->findOrFail($id);
 
-        return response()->json($tenant);
+        return response()->json(array_merge($tenant->toArray(), [
+            'stock_count' => $this->tenantStockCount($tenant),
+        ]));
+    }
+
+    /**
+     * Tenant schema'sidagi jami tovar soni: Inventory (IMEI birliklari) +
+     * Accessory (aksessuar pozitsiyalari). Bitta `run()` ichida hisoblanadi —
+     * tenant kontekstiga bir marta o'tiladi. Xatolik bo'lsa (schema yo'q yoki
+     * migratsiya qilinmagan) null qaytaradi, adminkada javob buzilmasin.
+     */
+    private function tenantStockCount(Tenant $tenant): ?int
+    {
+        try {
+            return $tenant->run(function () {
+                return \App\Models\Inventory::count() + \App\Models\Accessory::count();
+            });
+        } catch (\Throwable $e) {
+            return null;
+        }
     }
 
     public function store(Request $request): JsonResponse

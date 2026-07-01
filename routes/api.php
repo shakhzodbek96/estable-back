@@ -57,6 +57,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware([
     InitializeTenancyByOriginHeader::class,
+    \App\Http\Middleware\TrackTenantActivity::class,
 ])->group(function () {
 
 // ── Public katalog (mijozlar uchun — AUTH talab qilinmaydi) ──────────────

@@ -92,8 +92,14 @@ class ReturnService
                 'approved_at' => now(),
             ]);
 
-            $saleItem = $return->saleItem()->with(['inventory', 'accessory'])->first();
-            $investorId = $saleItem->sale->investor_id;
+            $saleItem = $return->saleItem()->with(['inventory', 'accessory', 'sale'])->first();
+
+            // Egа — item'ning O'ZINIKI (sale->investor_id emas): sotuvda bir necha investor
+            // bo'lishi mumkin, mablag' item darajasida taqsimlangan. Qaytarishda ayni shu
+            // tovar egasidan (agar investor bo'lsa) teskari hisoblaymiz.
+            $investorId = $saleItem->item_type->value === 'serial'
+                ? $saleItem->inventory?->investor_id
+                : $saleItem->accessory?->investor_id;
 
             // Qaytarilayotgan miqdor — bulk uchun qisman bo'lishi mumkin; serial uchun doim 1.
             $qty = $saleItem->item_type->value === 'serial'
@@ -161,18 +167,29 @@ class ReturnService
 
                 if ($investorId && !$return->transfers_to_shop) {
                     // Investor sotuv to'lovlari qabul qilingani sayin INKREMENTAL kreditlanadi
-                    // (SalePaymentService::accept), oldindan to'liq narxga emas. Shuning uchun
-                    // qaytarishda investordan faqat AYNI sotuvda haqiqatda kreditlangan summagacha
-                    // (qabul qilingan to'lovlar, USD) qaytaramiz — ortig'i emas. Bu qisman/umuman
-                    // to'lanmagan sotuvda balansning asossiz manfiyga ketishini oldini oladi.
-                    $creditedUsd = (float) SalePayment::where('sale_id', $return->sale_id)
+                    // (SalePaymentService::acceptPaymentRecord), har egа o'z tovarlari ulushiga
+                    // proportsional. Shuning uchun qaytarishda faqat AYNI investorga, AYNI
+                    // qaytarilayotgan tovar uchun haqiqatda kreditlangan summagacha qaytaramiz.
+                    //
+                    //   itemCreditedUsd = (qabul qilingan to'lovlar USD) × (qaytarilgan subtotal / sotuv summasi)
+                    //
+                    // Bu balansning asossiz manfiyga ketishini va boshqa investor ulushiga
+                    // tegib ketishini oldini oladi. Yagona-investor to'liq to'langan sotuvda
+                    // itemCreditedUsd = qaytarilgan subtotal ≥ refund → eski xatti-harakat saqlanadi.
+                    $acceptedUsd = (float) SalePayment::where('sale_id', $return->sale_id)
                         ->where('status', SalePaymentStatus::Accepted)
                         ->get()
                         ->sum(fn ($p) => $p->currency === Currency::Usd
                             ? (float) $p->amount
                             : (float) $p->amount / max((float) $p->rate, 0.0000001));
 
-                    $reverseAmount = min((float) $return->refund_amount, $creditedUsd);
+                    $saleTotal = (float) $saleItem->sale->total_price;
+                    $returnedSubtotal = (float) $saleItem->unit_price * $qty; // serial: qty=1
+                    $itemCreditedUsd = $saleTotal > 0
+                        ? $acceptedUsd * ($returnedSubtotal / $saleTotal)
+                        : 0.0;
+
+                    $reverseAmount = min((float) $return->refund_amount, $itemCreditedUsd);
 
                     if ($reverseAmount > 0) {
                         Investor::where('id', $investorId)

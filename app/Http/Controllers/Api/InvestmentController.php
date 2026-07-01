@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\InventoryStatus;
 use App\Enums\InvestmentType;
+use App\Enums\SalePaymentStatus;
 use App\Enums\TransactionType;
 use App\Http\Controllers\Controller;
 use App\Models\Accessory;
@@ -70,9 +71,12 @@ class InvestmentController extends Controller
 
         $investment = (float) ($rows[1] ?? 0);            // tikkan sarmoya (depozitlar)
         $inGoods = $this->inGoodsValue($investorId);       // hozir tovardagi kapital (sotilmagan)
+        $pending = $this->pendingReceivableValue($investorId); // sotilgan, kassada tasdiqlanmagan tushum
         $balance = (float) Investor::whereKey($investorId)->value('balance');
 
-        // Yig'ilgan (yechilmagan) foyda = joriy balans + tovardagi qiymat − tikkan sarmoya
+        // Yig'ilgan (yechilmagan) foyda = joriy balans + tovardagi qiymat − tikkan sarmoya.
+        // ESLATMA: pending (kutilayotgan tushum) foydaga QO'SHILMAYDI — u faqat kassada
+        // tasdiqlangach balansga tushadi. Alohida ko'rsatkich sifatida chiqariladi.
         $accumulatedProfit = round($balance + $inGoods - $investment, 2);
 
         return response()->json([
@@ -81,6 +85,7 @@ class InvestmentController extends Controller
             'clients_payment' => (float) ($rows[3] ?? 0),
             'buying_product' => (float) ($rows[4] ?? 0),
             'in_goods' => $inGoods,
+            'pending_receivable' => $pending,
             'balance' => round($balance, 2),
             'accumulated_profit' => $accumulatedProfit,
         ]);
@@ -101,6 +106,41 @@ class InvestmentController extends Controller
         $acc = (float) Accessory::where('investor_id', $investorId)
             ->selectRaw('COALESCE(SUM(purchase_price * (quantity - sold_quantity - consigned_quantity)), 0) as t')
             ->value('t');
+
+        return round($serial + $acc, 2);
+    }
+
+    /**
+     * Kutilayotgan tushum: investor tovarlari SOTILGAN, lekin kassada to'lovi hali
+     * TASDIQLANMAGAN (status=new) sotuvlar bo'yicha kutilayotgan tushum (subtotal, USD).
+     *
+     * Bu tovarlar sklad hisobidan (in_goods) chiqib ketgan, ammo pul balansga hali
+     * kelmagan — shu "oraliq"da investor qiymati vaqtincha tushib ko'rinmasligi uchun
+     * alohida ko'rsatiladi. To'lov tasdiqlangач bu summa balansga o'tadi.
+     */
+    private function pendingReceivableValue(int $investorId): float
+    {
+        $new = SalePaymentStatus::New->value;
+
+        $hasPendingPayment = fn ($q) => $q->from('sale_payments')
+            ->whereColumn('sale_payments.sale_id', 'sales.id')
+            ->where('sale_payments.status', $new);
+
+        $serial = (float) DB::table('sale_items')
+            ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+            ->join('inventories', 'sale_items.inventory_id', '=', 'inventories.id')
+            ->where('sale_items.item_type', 'serial')
+            ->where('inventories.investor_id', $investorId)
+            ->whereExists($hasPendingPayment)
+            ->sum('sale_items.subtotal');
+
+        $acc = (float) DB::table('sale_items')
+            ->join('sales', 'sale_items.sale_id', '=', 'sales.id')
+            ->join('accessories', 'sale_items.accessory_id', '=', 'accessories.id')
+            ->where('sale_items.item_type', 'bulk')
+            ->where('accessories.investor_id', $investorId)
+            ->whereExists($hasPendingPayment)
+            ->sum('sale_items.subtotal');
 
         return round($serial + $acc, 2);
     }

@@ -61,7 +61,10 @@ class DebtContactController extends Controller
 
     public function show(DebtContact $debt): JsonResponse
     {
-        $debt->load(['entries' => fn ($q) => $q->orderByDesc('entry_date')->orderByDesc('id')]);
+        $debt->load([
+            'entries' => fn ($q) => $q->orderByDesc('entry_date')->orderByDesc('id')
+                ->with('creator:id,name'),
+        ]);
         $debt->setAttribute('balances', $this->debts->balancesFor([$debt->id])->get($debt->id, []));
 
         return response()->json($debt);

@@ -37,59 +37,101 @@ use Illuminate\Support\Str;
  */
 class CatalogController extends Controller
 {
+    /**
+     * Katalog ro'yxati. Har "listing" — YA yangi (product bo'yicha jamlangan), YOKI
+     * alohida b/u (ishlatilgan) serial birlik. Yangilar bitta kartaga jamlanadi;
+     * har bir sotuvdagi b/u birlik esa o'z narxi bilan ALOHIDA karta bo'ladi.
+     */
     public function index(Request $request): JsonResponse
     {
-        $query = Product::query()
-            ->leftJoinSub($this->availabilitySub(), 'stock', 'stock.product_id', '=', 'products.id')
-            ->with(['category:id,name', 'primaryImage'])
-            ->select('products.*', 'stock.available', 'stock.price_min', 'stock.price_max');
+        $inStock = InventoryStatus::InStock->value;
+
+        // NEW listing: har product bo'yicha yangi (serial state=new) + bulk jamlanadi.
+        // Fantomni yashiramiz: yangi zaxira yo'q, LEKIN b/u birligi bor bo'lsa — bu
+        // "Нет" kartani ko'rsatmaymiz (uning o'rniga faqat b/u kartalar chiqadi).
+        $newListings = DB::table('products as p')
+            ->leftJoinSub($this->availabilitySub('new'), 'ns', 'ns.product_id', '=', 'p.id')
+            ->whereRaw(
+                "(ns.available > 0 OR NOT EXISTS (SELECT 1 FROM inventories iu WHERE iu.product_id = p.id AND iu.status = ? AND iu.state = 'used'))",
+                [$inStock]
+            )
+            ->selectRaw("p.id AS product_id, NULL::bigint AS inventory_id, 'new' AS state, p.name, p.category_id, p.type, ns.available, ns.price_min, ns.price_max");
+
+        // USED listing: har bir sotuvdagi ishlatilgan serial birlik alohida.
+        $usedListings = DB::table('inventories as i')
+            ->join('products as up', 'up.id', '=', 'i.product_id')
+            ->where('i.status', $inStock)
+            ->where('i.state', 'used')
+            ->selectRaw("i.product_id AS product_id, i.id AS inventory_id, 'used' AS state, up.name, up.category_id, up.type, 1 AS available, i.selling_price AS price_min, i.selling_price AS price_max");
+
+        $query = DB::query()->fromSub($newListings->unionAll($usedListings), 'l');
 
         if ($search = $request->string('search')->trim()->value()) {
-            $query->where('products.name', 'ilike', "%{$search}%");
+            $query->where('l.name', 'ilike', "%{$search}%");
         }
 
         if ($categoryId = $request->integer('category_id')) {
-            $query->where('products.category_id', $categoryId);
+            $query->where('l.category_id', $categoryId);
         }
 
         if ($request->boolean('in_stock')) {
-            $query->where('stock.available', '>', 0);
+            $query->where('l.available', '>', 0);
         }
 
         $min = $request->input('min_price');
         if ($min !== null && is_numeric($min)) {
-            $query->where('stock.price_min', '>=', (float) $min);
+            $query->where('l.price_min', '>=', (float) $min);
         }
 
         $max = $request->input('max_price');
         if ($max !== null && is_numeric($max)) {
-            $query->where('stock.price_min', '<=', (float) $max);
+            $query->where('l.price_min', '<=', (float) $max);
         }
 
         // Saralash. "Популярные" = bor tovarlar oldinda, keyin nom bo'yicha.
         match ($request->string('sort')->value()) {
-            'cheap' => $query->orderByRaw('stock.price_min ASC NULLS LAST')->orderBy('products.name'),
-            'expensive' => $query->orderByRaw('stock.price_max DESC NULLS LAST')->orderBy('products.name'),
-            default => $query->orderByRaw('(stock.available > 0) DESC')->orderBy('products.name'),
+            'cheap' => $query->orderByRaw('l.price_min ASC NULLS LAST')->orderBy('l.name')->orderBy('l.inventory_id'),
+            'expensive' => $query->orderByRaw('l.price_max DESC NULLS LAST')->orderBy('l.name')->orderBy('l.inventory_id'),
+            default => $query->orderByRaw('(l.available > 0) DESC')->orderBy('l.name')->orderBy('l.inventory_id'),
         };
 
         $perPage = max(1, min((int) $request->integer('per_page', 24), 60));
         $paginator = $query->paginate($perPage);
 
-        $ids = collect($paginator->items())->pluck('id')->all();
-        $stockImages = $this->stockImageMap($ids);
+        // Prezentatsiya: kategoriya nomlari + rasmlar (yangi vakil / aynan shu b/u birlik).
+        $rows = collect($paginator->items());
+        $productIds = $rows->pluck('product_id')->unique()->values()->all();
+        $usedInvIds = $rows->where('state', 'used')->pluck('inventory_id')->all();
 
-        $paginator->getCollection()->transform(
-            fn (Product $p) => $this->present($p, $stockImages[$p->id] ?? null)
-        );
+        $categoryNames = Category::query()
+            ->whereIn('id', $rows->pluck('category_id')->filter()->unique()->all())
+            ->pluck('name', 'id');
+        $productImages = Product::query()->with('primaryImage')->whereIn('id', $productIds)->get()->keyBy('id');
+        $newImages = $this->stockImageMap($productIds, 'new');
+        $usedImages = $this->usedImageMap($usedInvIds);
+
+        $paginator->setCollection($rows->map(function ($r) use ($categoryNames, $productImages, $newImages, $usedImages) {
+            $fallback = $productImages->get($r->product_id)?->primaryImage?->url;
+            $image = $r->state === 'used'
+                ? ($usedImages[$r->inventory_id] ?? $fallback)
+                : ($newImages[$r->product_id] ?? $fallback);
+
+            return $this->presentRow($r, $categoryNames[$r->category_id] ?? null, $image);
+        }));
 
         return response()->json($paginator);
     }
 
-    public function show(Product $product): JsonResponse
+    public function show(Product $product, Request $request): JsonResponse
     {
+        // B/U (ishlatilgan) birlik detali — ?unit={inventory_id}. Aynan shu birlik.
+        if ($unitId = $request->integer('unit')) {
+            return $this->showUsedUnit($product, $unitId);
+        }
+
+        // Yangi (jamlangan) detali — faqat YANGI zaxira bo'yicha (kartaga mos).
         $stock = DB::query()
-            ->fromSub($this->availabilitySub(), 's')
+            ->fromSub($this->availabilitySub('new'), 's')
             ->where('product_id', $product->id)
             ->first();
 
@@ -99,7 +141,7 @@ class CatalogController extends Controller
         $product->load(['category:id,name', 'images']);
 
         // Zaxira birligi rasmlari ustun; bo'lmasa — tovar (katalog) rasmlari.
-        $stockGallery = $this->stockGallery($product);
+        $stockGallery = $this->stockGallery($product, 'new');
         $images = $stockGallery->isNotEmpty()
             ? $stockGallery
             : $product->images->map(fn ($i) => ['id' => $i->id, 'url' => $i->url])->values();
@@ -109,10 +151,60 @@ class CatalogController extends Controller
         $data = $this->present($product, $main);
         $data['category_description'] = $product->category?->description;
         $data['images'] = $images->values();
-        $data['specs'] = $this->stockSpecs($product);
-        $data['stores'] = $this->storeAvailability($product);
+        $data['specs'] = $this->stockSpecs($product, 'new');
+        $data['stores'] = $this->storeAvailability($product, 'new');
 
         return response()->json($data);
+    }
+
+    /**
+     * Bitta b/u (ishlatilgan) serial birlik detali — o'z narxi, holati (korobka,
+     * izoh), rasmlari va joylashgan do'koni. Faqat sotuvda turgan birlik.
+     */
+    private function showUsedUnit(Product $product, int $unitId): JsonResponse
+    {
+        $unit = Inventory::query()
+            ->where('id', $unitId)
+            ->where('product_id', $product->id)
+            ->where('status', InventoryStatus::InStock->value)
+            ->where('state', 'used')
+            ->with('images')
+            ->first();
+
+        abort_if($unit === null, 404);
+
+        $product->load(['category:id,name', 'images']);
+
+        // Birlikning o'z rasmlari ustun; bo'lmasa — tovar (katalog) rasmlari.
+        $images = $unit->images->map(fn ($i) => ['id' => $i->id, 'url' => $i->url])->values();
+        if ($images->isEmpty()) {
+            $images = $product->images->map(fn ($i) => ['id' => $i->id, 'url' => $i->url])->values();
+        }
+        $main = $images->first()['url'] ?? $product->primaryImage?->url;
+
+        $shop = $unit->shop_id ? Shop::query()->find($unit->shop_id, ['id', 'name']) : null;
+
+        return response()->json([
+            'id' => $product->id,
+            'inventory_id' => $unit->id,
+            'state' => 'used',
+            'name' => $product->name,
+            'type' => $product->type->value,
+            'category' => $product->category
+                ? ['id' => $product->category->id, 'name' => $product->category->name]
+                : null,
+            'image' => $main,
+            'in_stock' => true,
+            'available' => 1,
+            'price_min' => (float) $unit->selling_price,
+            'price_max' => (float) $unit->selling_price,
+            'category_description' => $product->category?->description,
+            'images' => $images,
+            'specs' => $this->presentAttributes($unit->custom_attributes),
+            'stores' => $shop ? [['id' => $shop->id, 'name' => $shop->name, 'available' => 1]] : [],
+            'has_box' => (bool) $unit->has_box,
+            'notes' => $unit->notes,
+        ]);
     }
 
     /**
@@ -121,7 +213,7 @@ class CatalogController extends Controller
      *
      * @return array<int,array{name:string,value:mixed,unit:?string,icon:?string,icon_color:?string}>
      */
-    private function stockSpecs(Product $product): array
+    private function stockSpecs(Product $product, ?string $serialState = null): array
     {
         $unit = $product->type === ProductType::Bulk
             ? Accessory::query()
@@ -134,11 +226,22 @@ class CatalogController extends Controller
             : Inventory::query()
                 ->where('product_id', $product->id)
                 ->where('status', InventoryStatus::InStock->value)
+                ->when($serialState !== null, fn ($q) => $q->where('state', $serialState))
                 ->whereNotNull('custom_attributes')
                 ->orderBy('id')
                 ->first();
 
-        $attrs = $unit?->custom_attributes;
+        return $this->presentAttributes($unit?->custom_attributes);
+    }
+
+    /**
+     * custom_attributes (snapshot) massivini mijozga ko'rsatiladigan xarakteristikalar
+     * ro'yxatiga aylantiradi.
+     *
+     * @return array<int,array{name:string,value:mixed,unit:?string,icon:?string,icon_color:?string}>
+     */
+    private function presentAttributes(mixed $attrs): array
+    {
         if (! is_array($attrs)) {
             return [];
         }
@@ -162,13 +265,14 @@ class CatalogController extends Controller
      *
      * @return array<int,array{id:int,name:string,available:int}>
      */
-    private function storeAvailability(Product $product): array
+    private function storeAvailability(Product $product, ?string $serialState = null): array
     {
         $shops = Shop::query()->orderBy('name')->get(['id', 'name']);
 
         $serial = DB::table('inventories')
             ->where('product_id', $product->id)
             ->where('status', InventoryStatus::InStock->value)
+            ->when($serialState !== null, fn ($q) => $q->where('state', $serialState))
             ->groupBy('shop_id')
             ->selectRaw('shop_id, COUNT(*) AS c')
             ->pluck('c', 'shop_id');
@@ -307,11 +411,18 @@ class CatalogController extends Controller
      * Serial (inventories, status=in_stock) + bulk (accessories, mavjud miqdor) birlashtiriladi,
      * product_id bo'yicha guruhlanadi: available (jami dona), price_min, price_max.
      */
-    private function availabilitySub(): QueryBuilder
+    private function availabilitySub(?string $serialState = null): QueryBuilder
     {
         $serial = DB::table('inventories')
-            ->where('status', InventoryStatus::InStock->value)
-            ->selectRaw('product_id, 1 AS available, selling_price AS price');
+            ->where('status', InventoryStatus::InStock->value);
+
+        // Serial birliklarni holat bo'yicha cheklash (null — barchasi; 'new' — faqat yangi).
+        // Bulk (accessories) da holat yo'q — ular doim yangi hisoblanadi.
+        if ($serialState !== null) {
+            $serial->where('state', $serialState);
+        }
+
+        $serial->selectRaw('product_id, 1 AS available, selling_price AS price');
 
         $bulk = DB::table('accessories')
             ->where('is_active', true)
@@ -335,19 +446,25 @@ class CatalogController extends Controller
      * @param  array<int>  $ids
      * @return array<int,string|null>
      */
-    private function stockImageMap(array $ids): array
+    private function stockImageMap(array $ids, ?string $serialState = null): array
     {
         if (empty($ids)) {
             return [];
         }
 
-        $serial = DB::table('inventories as i')
+        $serialQuery = DB::table('inventories as i')
             ->join('images as img', function ($j) {
                 $j->on('img.imageable_id', '=', 'i.id')
                     ->where('img.imageable_type', '=', Inventory::class);
             })
             ->where('i.status', InventoryStatus::InStock->value)
-            ->whereIn('i.product_id', $ids)
+            ->whereIn('i.product_id', $ids);
+
+        if ($serialState !== null) {
+            $serialQuery->where('i.state', $serialState);
+        }
+
+        $serial = $serialQuery
             ->selectRaw('DISTINCT ON (i.product_id) i.product_id, img.path')
             ->orderByRaw('i.product_id, img.is_primary DESC, img.sort_order ASC, img.id ASC')
             ->get();
@@ -377,12 +494,43 @@ class CatalogController extends Controller
     }
 
     /**
+     * B/U (ishlatilgan) birliklar uchun har bir inventory birligining vakil rasmi
+     * (inventory_id => url). Har birlik alohida karta bo'lgani uchun o'z rasmi kerak.
+     *
+     * @param  array<int>  $inventoryIds
+     * @return array<int,string|null>
+     */
+    private function usedImageMap(array $inventoryIds): array
+    {
+        if (empty($inventoryIds)) {
+            return [];
+        }
+
+        $rows = DB::table('inventories as i')
+            ->join('images as img', function ($j) {
+                $j->on('img.imageable_id', '=', 'i.id')
+                    ->where('img.imageable_type', '=', Inventory::class);
+            })
+            ->whereIn('i.id', $inventoryIds)
+            ->selectRaw('DISTINCT ON (i.id) i.id, img.path')
+            ->orderByRaw('i.id, img.is_primary DESC, img.sort_order ASC, img.id ASC')
+            ->get();
+
+        $map = [];
+        foreach ($rows as $r) {
+            $map[$r->id] = TenantMedia::url($r->path);
+        }
+
+        return $map;
+    }
+
+    /**
      * Tovar detali uchun vakil zaxira-birlik (rasmga ega bor inventory/accessory) galereyasi.
      * Bo'lmasa — bo'sh collection (chaqiruvchi katalog rasmlariga qaytadi).
      *
      * @return Collection<int,array{id:int,url:string|null}>
      */
-    private function stockGallery(Product $product): Collection
+    private function stockGallery(Product $product, ?string $serialState = null): Collection
     {
         $unit = $product->type === ProductType::Bulk
             ? Accessory::query()
@@ -396,6 +544,7 @@ class CatalogController extends Controller
             : Inventory::query()
                 ->where('product_id', $product->id)
                 ->where('status', InventoryStatus::InStock->value)
+                ->when($serialState !== null, fn ($q) => $q->where('state', $serialState))
                 ->whereHas('images')
                 ->with('images')
                 ->orderBy('id')
@@ -406,13 +555,15 @@ class CatalogController extends Controller
             : collect();
     }
 
-    /** Bitta tovarni mijozga ko'rsatiladigan xavfsiz shaklga aylantiradi. */
+    /** Bitta tovarni (yangi, jamlangan) mijozga ko'rsatiladigan xavfsiz shaklga aylantiradi. */
     private function present(Product $p, ?string $stockImage = null): array
     {
         $available = (int) ($p->available ?? 0);
 
         return [
             'id' => $p->id,
+            'inventory_id' => null,
+            'state' => 'new',
             'name' => $p->name,
             'type' => $p->type->value,
             'category' => $p->category
@@ -424,6 +575,31 @@ class CatalogController extends Controller
             'available' => $available,
             'price_min' => $p->price_min !== null ? (float) $p->price_min : null,
             'price_max' => $p->price_max !== null ? (float) $p->price_max : null,
+        ];
+    }
+
+    /**
+     * Katalog ro'yxatidagi bitta "listing" qatorini (yangi jamlangan yoki b/u birlik)
+     * mijoz kartasiga aylantiradi. Kategoriya nomi va rasm tashqaridan beriladi.
+     */
+    private function presentRow(object $r, ?string $categoryName, ?string $image): array
+    {
+        $available = (int) ($r->available ?? 0);
+
+        return [
+            'id' => (int) $r->product_id,
+            'inventory_id' => $r->inventory_id !== null ? (int) $r->inventory_id : null,
+            'state' => $r->state, // 'new' | 'used'
+            'name' => $r->name,
+            'type' => $r->type,
+            'category' => $r->category_id
+                ? ['id' => (int) $r->category_id, 'name' => $categoryName]
+                : null,
+            'image' => $image,
+            'in_stock' => $available > 0,
+            'available' => $available,
+            'price_min' => $r->price_min !== null ? (float) $r->price_min : null,
+            'price_max' => $r->price_max !== null ? (float) $r->price_max : null,
         ];
     }
 }
