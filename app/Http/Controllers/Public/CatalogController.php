@@ -9,6 +9,7 @@ use App\Models\Accessory;
 use App\Models\Category;
 use App\Models\Inventory;
 use App\Models\Product;
+use App\Models\Rate;
 use App\Models\Setting;
 use App\Models\Shop;
 use App\Support\TenantMedia;
@@ -378,6 +379,10 @@ class CatalogController extends Controller
                 ->first() ?: Str::headline((string) tenant('id'));
         }
 
+        // Joriy USD→UZS kursi (prays-list so'm ekvivalenti uchun). Kurs yo'q bo'lsa
+        // frontend o'z fallback qiymatiga tushadi.
+        $rate = Rate::current()?->rate;
+
         return response()->json([
             'name' => $name,
             'tenant' => tenant('id'),
@@ -385,6 +390,7 @@ class CatalogController extends Controller
             'phone' => $field('phone'),
             'telegram' => $field('telegram'),
             'instagram' => $field('instagram'),
+            'rate' => $rate !== null ? (float) $rate : null,
         ]);
     }
 

@@ -26,10 +26,23 @@ class InventoryService
         return DB::transaction(function () use ($data) {
             $inventories = collect();
 
-            $totalExtraCost = 0;
+            // Umumiy (default) narxlar — per-IMEI narx berilmagan qatorlar uchun.
+            $defaultPurchase = (float) $data['purchase_price'];
+            $defaultSelling = (float) $data['selling_price'];
+            $defaultWholesale = $data['wholesale_price'] ?? null;
+
+            $totalCost = 0.0;
             foreach ($data['serials'] as $serial) {
                 $serialExtraCost = (float) ($serial['extra_cost'] ?? 0);
-                $totalExtraCost += $serialExtraCost;
+
+                // Per-IMEI narx override — bo'sh/berilmagan bo'lsa umumiy default ishlatiladi.
+                $purchasePrice = isset($serial['purchase_price']) ? (float) $serial['purchase_price'] : $defaultPurchase;
+                $sellingPrice = isset($serial['selling_price']) ? (float) $serial['selling_price'] : $defaultSelling;
+                $wholesalePrice = array_key_exists('wholesale_price', $serial) && $serial['wholesale_price'] !== null
+                    ? (float) $serial['wholesale_price']
+                    : $defaultWholesale;
+
+                $totalCost += $purchasePrice + $serialExtraCost;
 
                 // Dinamik xususiyatlar — har bir serial uchun alohida snapshot
                 $customAttributes = $this->attributes->snapshot($serial['custom_attributes'] ?? null, AttributeScope::Serial);
@@ -38,10 +51,10 @@ class InventoryService
                     'product_id' => $data['product_id'],
                     'serial_number' => $serial['serial_number'],
                     'extra_serial_number' => $serial['extra_serial_number'] ?? null,
-                    'purchase_price' => $data['purchase_price'],
+                    'purchase_price' => $purchasePrice,
                     'extra_cost' => $serialExtraCost,
-                    'selling_price' => $data['selling_price'],
-                    'wholesale_price' => $data['wholesale_price'] ?? null,
+                    'selling_price' => $sellingPrice,
+                    'wholesale_price' => $wholesalePrice,
                     'status' => InventoryStatus::InStock,
                     'has_box' => $data['has_box'] ?? true,
                     'state' => $data['state'] ?? 'new',
@@ -56,7 +69,6 @@ class InventoryService
             // Har qanday tovar kirimi xarajat sifatida Transaction (type=Purchase) yaratadi.
             // Investor tanlangan bo'lsa — qo'shimcha Investment + investor.balance kamayadi.
             // Investor tanlanmagan bo'lsa — do'kon xarajati (investor_id = null, shop_id orqali ajraladi).
-            $totalCost = $data['purchase_price'] * count($data['serials']) + $totalExtraCost;
 
             if ($totalCost > 0) {
                 $rate = Rate::current();

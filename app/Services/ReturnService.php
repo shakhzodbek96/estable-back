@@ -29,6 +29,12 @@ class ReturnService
     {
         $saleItem = SaleItem::with(['sale', 'inventory', 'accessory'])->findOrFail($data['sale_item_id']);
 
+        // Qaytarish faqat kassada TASDIQLANGAN sotuvga ruxsat etiladi. Tasdiqlanmagan
+        // (to'lovi 'new') sotuv qaytarish orqali emas — to'lovni rad etish orqali bekor
+        // qilinadi (SalePaymentService::reject → cancelSale). Aks holda: fantom investor
+        // krediti, kassada asossiz minus, pending double-count kelib chiqadi.
+        $this->assertSaleConfirmed($saleItem->sale_id);
+
         $isSerial = $saleItem->item_type->value === 'serial';
         $lineQty = $isSerial ? 1 : (int) $saleItem->quantity;
 
@@ -76,6 +82,10 @@ class ReturnService
         if ($return->status !== ReturnStatus::Pending) {
             throw new \Exception("Faqat kutilayotgan qaytarishni tasdiqlash mumkin");
         }
+
+        // Belt-and-suspenders: tasdiqlash paytida ham sotuv kassada tasdiqlangan bo'lishi shart
+        // (create() dan keyin to'lov bekor qilingan bo'lishi mumkin).
+        $this->assertSaleConfirmed($return->sale_id);
 
         // Obmen (ExchangeSame/ExchangeDifferent) hozircha hisob-kitobni amalga oshirmaydi:
         // original sotuv krediti teskari hisoblanmaydi, price_difference va yangi sotuv (new_sale_id)
@@ -215,6 +225,23 @@ class ReturnService
                 'customer', 'creator:id,name', 'approver:id,name',
             ]);
         });
+    }
+
+    /**
+     * Sotuv kassada tasdiqlangan (kamida bitta Accepted to'lov) bo'lishini talab qiladi.
+     * Atomar tasdiqlash sababli sotuv yo to'liq tasdiqlangan, yo 'new' holatida bo'ladi.
+     */
+    private function assertSaleConfirmed(int $saleId): void
+    {
+        $hasAccepted = SalePayment::where('sale_id', $saleId)
+            ->where('status', SalePaymentStatus::Accepted)
+            ->exists();
+
+        if (! $hasAccepted) {
+            throw new \Exception(
+                'Продажа не подтверждена в кассе — возврат невозможен. Отмените продажу через отклонение платежа.'
+            );
+        }
     }
 
     /**

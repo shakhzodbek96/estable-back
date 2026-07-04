@@ -29,6 +29,10 @@ class BulkStoreInventoryRequest extends FormRequest
             'serials.*.serial_number' => ['required', 'string', 'max:255', 'distinct', Rule::unique('inventories', 'serial_number')->where('status', InventoryStatus::InStock->value)],
             'serials.*.extra_serial_number' => ['nullable', 'string', 'max:255'],
             'serials.*.extra_cost' => ['nullable', 'numeric', 'min:0'],
+            // Per-IMEI narxlar — ixtiyoriy override. Bo'sh bo'lsa yuqoridagi umumiy (default) narx ishlatiladi.
+            'serials.*.purchase_price' => ['nullable', 'numeric', 'min:0'],
+            'serials.*.selling_price' => ['nullable', 'numeric', 'min:0'],
+            'serials.*.wholesale_price' => ['nullable', 'numeric', 'min:0'],
             'serials.*.notes' => ['nullable', 'string', 'max:1000'],
             // Dinamik xususiyatlar — HAR bir serial uchun alohida (IMEI kabi)
             'serials.*.custom_attributes' => ['nullable', 'array'],
