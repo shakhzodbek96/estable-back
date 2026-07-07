@@ -4,6 +4,8 @@ use App\Http\Controllers\Central\AdminAuthController;
 use App\Http\Controllers\Central\AdminUserController;
 use App\Http\Controllers\Central\DashboardController;
 use App\Http\Controllers\Central\HealthController;
+use App\Http\Controllers\Central\TelegramConfigController;
+use App\Http\Controllers\Central\TelegramSubscriberController;
 use App\Http\Controllers\Central\TelegramWebhookController;
 use App\Http\Controllers\Central\TenantController;
 use Illuminate\Support\Facades\Route;
@@ -31,9 +33,9 @@ Route::get('ping', function () {
     ]);
 });
 
-// Telegram webhook (public) — tenant URL yo'lidan aniqlanadi, secret header bilan himoyalanadi.
-// Telegram bu URL'ga har tenant boti uchun POST yuboradi (setWebhook orqali o'rnatiladi).
-Route::post('telegram/webhook/{tenant}', [TelegramWebhookController::class, 'handle']);
+// Telegram webhook (public) — YAGONA markaziy bot. Secret header bilan himoyalanadi.
+// Telegram bu URL'ga POST yuboradi (setWebhook orqali o'rnatiladi).
+Route::post('telegram/webhook', [TelegramWebhookController::class, 'handle']);
 
 // Auth (public)
 Route::prefix('auth')->group(function () {
@@ -75,6 +77,17 @@ Route::middleware(['auth:sanctum', 'admin'])->group(function () {
     Route::get('admin-users', [AdminUserController::class, 'index']);
     Route::post('admin-users', [AdminUserController::class, 'store']);
     Route::delete('admin-users/{adminUser}', [AdminUserController::class, 'destroy']);
+
+    // Yagona markaziy info-bot: token konfiguratsiyasi (secret sharti bilan)
+    Route::get('telegram/config', [TelegramConfigController::class, 'show']);
+    Route::put('telegram/config', [TelegramConfigController::class, 'update']);
+
+    // Bot obunachilari (markaziy reestr) + boshqaruv: block/unblock/leave
+    Route::get('telegram/subscribers', [TelegramSubscriberController::class, 'index']);
+    Route::post('telegram/subscribers/{tgUser}/block', [TelegramSubscriberController::class, 'block']);
+    Route::post('telegram/subscribers/{tgUser}/unblock', [TelegramSubscriberController::class, 'unblock']);
+    Route::post('telegram/subscribers/{tgUser}/leave', [TelegramSubscriberController::class, 'leave']);
+    Route::delete('telegram/subscribers/{tgUser}', [TelegramSubscriberController::class, 'destroy']);
 
     // Health check — queue va scheduler monitoring
     Route::prefix('health')->group(function () {

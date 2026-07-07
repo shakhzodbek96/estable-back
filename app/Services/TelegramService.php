@@ -126,6 +126,29 @@ class TelegramService
         }
     }
 
+    /**
+     * Bot berilgan guruh/kanaldan chiqadi (leaveChat).
+     *
+     * @return array{ok: bool, error: string|null}
+     */
+    public function leaveChat(string $token, string $chatId): array
+    {
+        try {
+            $res = Http::timeout(10)->asForm()->post(self::API . "/bot{$token}/leaveChat", [
+                'chat_id' => $chatId,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('[Telegram] leaveChat exception: ' . $e->getMessage());
+            return ['ok' => false, 'error' => 'Не удалось связаться с Telegram.'];
+        }
+
+        if ($res->successful() && $res->json('ok') === true) {
+            return ['ok' => true, 'error' => null];
+        }
+
+        return ['ok' => false, 'error' => (string) ($res->json('description') ?? ('HTTP ' . $res->status()))];
+    }
+
     /** Telegram xato tavsifini foydalanuvchi tushunadigan ruscha matnga o'giradi. */
     private function humanError(string $desc): string
     {

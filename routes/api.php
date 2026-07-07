@@ -25,7 +25,6 @@ use App\Http\Controllers\Api\ShiftController;
 use App\Http\Controllers\Api\SaleScanController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\ReportController;
-use App\Http\Controllers\Api\TgSubscriberController;
 use App\Http\Controllers\Api\ReturnController;
 use App\Http\Controllers\Api\InventoryStatusController;
 use App\Http\Controllers\Api\ConsignmentController;
@@ -232,15 +231,10 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // Do'kon ma'lumoti (faqat admin o'rnatadi)
     Route::put('settings/store-info', [SettingController::class, 'updateStoreInfo']);
 
-    // Telegram bot — kunlik hisobot + sotuv bildirishnomasi (faqat admin)
+    // Telegram — tenant maqsadli chat_id'lari (markaziy bot orqali). Faqat admin.
     Route::get('settings/telegram', [SettingController::class, 'telegramConfig']);
     Route::put('settings/telegram', [SettingController::class, 'updateTelegramConfig']);
     Route::post('settings/telegram/send', [SettingController::class, 'sendTelegramNow']);
-
-    // Telegram obunachilar moduli (faqat admin)
-    Route::get('telegram/subscribers', [TgSubscriberController::class, 'index']);
-    Route::post('telegram/otp', [TgSubscriberController::class, 'generateOtp']);
-    Route::delete('telegram/subscribers/{tgUser}', [TgSubscriberController::class, 'destroy']);
 
     // Inventories
     Route::get('inventories/search', [InventoryController::class, 'search']);

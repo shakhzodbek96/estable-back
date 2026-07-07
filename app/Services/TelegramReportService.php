@@ -4,7 +4,9 @@ namespace App\Services;
 
 use App\Models\Sale;
 use App\Models\Setting;
+use App\Models\TelegramConfig;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Joriy tenant uchun kunlik KPI hisobotini Telegram kanaliga yuboradi.
@@ -21,8 +23,11 @@ class TelegramReportService
     ) {
     }
 
+    /** Tenant maqsadli-config kesh kaliti (tenant-scoped). */
+    public const CACHE_KEY = 'telegram_tenant_cfg';
+
     /**
-     * Joriy tenant admin kanaliga kunlik hisobotni yuboradi.
+     * Kunlik hisobotni tenant sozlagan "report_chat_id"ga yuboradi (markaziy bot orqali).
      *
      * @return array{ok: bool, skipped?: bool, error?: string|null}
      */
@@ -30,12 +35,14 @@ class TelegramReportService
     {
         $cfg = $this->config();
 
-        if (! $cfg['enabled']) {
+        if (! $cfg['daily_report_enabled']) {
             return ['ok' => false, 'skipped' => true, 'error' => null];
         }
-
-        if ($cfg['bot_token'] === '' || $cfg['chat_id'] === '') {
-            return ['ok' => false, 'error' => 'Бот не настроен: укажите токен и Chat ID.'];
+        if ($cfg['bot_token'] === '') {
+            return ['ok' => false, 'error' => 'Центральный бот не настроен администратором.'];
+        }
+        if ($cfg['report_chat_id'] === '') {
+            return ['ok' => false, 'error' => 'Не указан Chat ID для отчётов.'];
         }
 
         $to = $dateTo ?? now()->toDateString();
@@ -44,11 +51,11 @@ class TelegramReportService
         $data = $this->reports->dashboard(['date_from' => $from, 'date_to' => $to]);
         $text = $this->format($data, $from, $to);
 
-        return $this->telegram->sendMessage($cfg['bot_token'], $cfg['chat_id'], $text);
+        return $this->telegram->sendMessage($cfg['bot_token'], $cfg['report_chat_id'], $text);
     }
 
     /**
-     * Joriy tenant kanaliga bitta sotuv haqida bildirishnoma yuboradi.
+     * Bitta sotuv bildirishnomasini tenant sozlagan "sale_chat_id"ga yuboradi.
      * POS sotuvi commit bo'lgach (SendSaleTelegramNotification job orqali) chaqiriladi.
      *
      * @return array{ok: bool, skipped?: bool, error?: string|null}
@@ -60,9 +67,11 @@ class TelegramReportService
         if (! $cfg['notify_on_sale']) {
             return ['ok' => false, 'skipped' => true, 'error' => null];
         }
-
-        if ($cfg['bot_token'] === '' || $cfg['chat_id'] === '') {
-            return ['ok' => false, 'error' => 'Бот не настроен: укажите токен и Chat ID.'];
+        if ($cfg['bot_token'] === '') {
+            return ['ok' => false, 'error' => 'Центральный бот не настроен.'];
+        }
+        if ($cfg['sale_chat_id'] === '') {
+            return ['ok' => false, 'error' => 'Не указан Chat ID для продаж.'];
         }
 
         $sale = Sale::with(['customer:id,name', 'seller:id,name', 'items:id,sale_id,quantity'])->find($saleId);
@@ -71,28 +80,34 @@ class TelegramReportService
             return ['ok' => false, 'skipped' => true, 'error' => null];
         }
 
-        return $this->telegram->sendMessage($cfg['bot_token'], $cfg['chat_id'], $this->formatSale($sale));
+        return $this->telegram->sendMessage($cfg['bot_token'], $cfg['sale_chat_id'], $this->formatSale($sale));
     }
 
     /**
-     * Setting'dan konfiguratsiyani standart qiymatlar bilan qaytaradi.
+     * Tenant maqsadli-konfiguratsiyasi + markaziy bot token (keshlangan).
      *
-     * @return array{enabled: bool, notify_on_sale: bool, bot_token: string, chat_id: string, send_hour: int}
+     * @return array{bot_token: string, notify_on_sale: bool, sale_chat_id: string, daily_report_enabled: bool, report_chat_id: string, send_hour: int}
      */
     public function config(): array
     {
-        $p = Setting::getValue(Setting::TELEGRAM_BOT_CONFIG, []);
+        // Tenant sozlamasi keshlanadi (saqlashda forgetCache bilan tozalanadi)
+        $p = Cache::remember(self::CACHE_KEY, 600, fn () => Setting::getValue(Setting::TELEGRAM_BOT_CONFIG, []));
         $p = is_array($p) ? $p : [];
 
         return [
-            'enabled' => (bool) ($p['enabled'] ?? false),
+            'bot_token' => TelegramConfig::activeToken(), // markaziy, keshlangan
             'notify_on_sale' => (bool) ($p['notify_on_sale'] ?? false),
-            'bot_token' => is_string($p['bot_token'] ?? null) ? trim($p['bot_token']) : '',
-            'bot_username' => is_string($p['bot_username'] ?? null) ? $p['bot_username'] : '',
-            'webhook_secret' => is_string($p['webhook_secret'] ?? null) ? $p['webhook_secret'] : '',
-            'chat_id' => trim((string) ($p['chat_id'] ?? '')),
+            'sale_chat_id' => trim((string) ($p['sale_chat_id'] ?? '')),
+            'daily_report_enabled' => (bool) ($p['daily_report_enabled'] ?? false),
+            'report_chat_id' => trim((string) ($p['report_chat_id'] ?? '')),
             'send_hour' => max(0, min(23, (int) ($p['send_hour'] ?? 21))),
         ];
+    }
+
+    /** Tenant config kesh'ini tozalash (sozlama saqlanganда). */
+    public static function forgetCache(): void
+    {
+        Cache::forget(self::CACHE_KEY);
     }
 
     /**

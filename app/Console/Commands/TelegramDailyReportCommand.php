@@ -30,7 +30,7 @@ class TelegramDailyReportCommand extends Command
     {
         $cfg = $service->config();
 
-        if (! $cfg['enabled']) {
+        if (! $cfg['daily_report_enabled']) {
             return self::SUCCESS; // o'chirilgan — jim o'tkazib yuboriladi
         }
 

@@ -4,12 +4,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Setting;
+use App\Models\TelegramConfig;
 use App\Services\TelegramReportService;
-use App\Services\TelegramService;
-use App\Services\TgSubscriberService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class SettingController extends Controller
@@ -116,99 +114,65 @@ class SettingController extends Controller
     }
 
     /**
-     * Telegram bot konfiguratsiyasi (faqat admin o'qiydi).
-     * Token XAVFSIZLIK uchun qaytarilmaydi — faqat o'rnatilgan/yo'qligi (has_token).
+     * Tenant Telegram sozlamasi (faqat admin o'qiydi).
+     * Bot token MARKAZIY (admin panelda) — bu yerda faqat maqsadli chat_id'lar.
      */
-    public function telegramConfig(TelegramReportService $service, TgSubscriberService $subscribers): JsonResponse
+    public function telegramConfig(TelegramReportService $service): JsonResponse
     {
         $cfg = $service->config();
+        $central = TelegramConfig::current();
 
         return response()->json([
-            'enabled' => $cfg['enabled'],
             'notify_on_sale' => $cfg['notify_on_sale'],
-            'chat_id' => $cfg['chat_id'],
+            'sale_chat_id' => $cfg['sale_chat_id'],
+            'daily_report_enabled' => $cfg['daily_report_enabled'],
+            'report_chat_id' => $cfg['report_chat_id'],
             'send_hour' => $cfg['send_hour'],
-            'has_token' => $cfg['bot_token'] !== '',
-            'bot_username' => $cfg['bot_username'] ?: null,
-            'webhook_active' => $cfg['bot_token'] !== '' && $cfg['webhook_secret'] !== '',
-            'webhook_url' => $subscribers->webhookUrl(),
+            // Markaziy bot holati — tenant chat_id qo'yishi mumkinligini belgilaydi
+            'bot_configured' => $cfg['bot_token'] !== '',
+            'bot_username' => $central?->bot_username,
         ]);
     }
 
     /**
-     * Telegram bot konfiguratsiyasini yangilaydi (faqat admin).
-     * bot_token faqat yangi (bo'sh bo'lmagan) qiymat kelganda yangilanadi —
-     * bo'sh kelsa eski token saqlanadi (frontend har safar token so'ramasin).
+     * Tenant Telegram sozlamasini yangilaydi (faqat admin).
+     * ★ Shart: markaziy bot token set qilinmagan bo'lsa — chat_id qo'yib bo'lmaydi.
      */
-    public function updateTelegramConfig(
-        Request $request,
-        TelegramService $telegram,
-        TgSubscriberService $subscribers,
-    ): JsonResponse {
-        $data = $request->validate([
-            'enabled' => ['required', 'boolean'],
-            'notify_on_sale' => ['required', 'boolean'],
-            'chat_id' => ['nullable', 'string', 'max:100'],
-            'send_hour' => ['required', 'integer', 'min:0', 'max:23'],
-            'bot_token' => ['nullable', 'string', 'max:100'],
-        ], [], [
-            'chat_id' => 'Chat ID',
-            'send_hour' => 'Час отправки',
-            'bot_token' => 'Токен бота',
-        ]);
-
-        $current = Setting::getValue(Setting::TELEGRAM_BOT_CONFIG, []);
-        $current = is_array($current) ? $current : [];
-
-        $newToken = trim((string) ($data['bot_token'] ?? ''));
-        $tokenChanged = $newToken !== '';
-        $token = $tokenChanged
-            ? $newToken
-            : (is_string($current['bot_token'] ?? null) ? $current['bot_token'] : '');
-
-        // Webhook secret — bir marta generatsiya qilinadi va saqlanadi
-        $secret = is_string($current['webhook_secret'] ?? null) && $current['webhook_secret'] !== ''
-            ? $current['webhook_secret']
-            : Str::random(48);
-
-        // Bot username — token o'zgargan bo'lsa yoki hali aniqlanmagan bo'lsa getMe orqali olamiz
-        $botUsername = is_string($current['bot_username'] ?? null) ? $current['bot_username'] : '';
-        if ($token !== '' && ($tokenChanged || $botUsername === '')) {
-            $info = $telegram->getBotInfo($token);
-            $botUsername = $info['username'] ?? $botUsername;
+    public function updateTelegramConfig(Request $request): JsonResponse
+    {
+        // Req 3: bot token bo'lmasa tenant chat_id qo'ya olmaydi
+        if (TelegramConfig::activeToken() === '') {
+            return response()->json([
+                'message' => 'Telegram-бот ещё не настроен администратором. Обратитесь к администратору.',
+            ], 422);
         }
 
+        $data = $request->validate([
+            'notify_on_sale' => ['required', 'boolean'],
+            'sale_chat_id' => ['nullable', 'string', 'max:100'],
+            'daily_report_enabled' => ['required', 'boolean'],
+            'report_chat_id' => ['nullable', 'string', 'max:100'],
+            'send_hour' => ['required', 'integer', 'min:0', 'max:23'],
+        ], [], [
+            'sale_chat_id' => 'Chat ID для продаж',
+            'report_chat_id' => 'Chat ID для отчётов',
+            'send_hour' => 'Час отправки',
+        ]);
+
         $payload = [
-            'enabled' => (bool) $data['enabled'],
             'notify_on_sale' => (bool) $data['notify_on_sale'],
-            'chat_id' => trim((string) ($data['chat_id'] ?? '')),
+            'sale_chat_id' => trim((string) ($data['sale_chat_id'] ?? '')),
+            'daily_report_enabled' => (bool) $data['daily_report_enabled'],
+            'report_chat_id' => trim((string) ($data['report_chat_id'] ?? '')),
             'send_hour' => (int) $data['send_hour'],
-            'bot_token' => $token,
-            'bot_username' => $botUsername,
-            'webhook_secret' => $secret,
         ];
 
         Setting::setValue(Setting::TELEGRAM_BOT_CONFIG, $payload);
+        TelegramReportService::forgetCache(); // kesh yangilanadi
 
-        // Token bor bo'lsa — webhook'ni o'rnatamiz (obunachi qo'shilishi uchun shart)
-        $webhookError = null;
-        if ($token !== '') {
-            $res = $subscribers->ensureWebhook();
-            if (! ($res['ok'] ?? false)) {
-                $webhookError = $res['error'] ?? null;
-            }
-        }
-
-        return response()->json([
-            'enabled' => $payload['enabled'],
-            'notify_on_sale' => $payload['notify_on_sale'],
-            'chat_id' => $payload['chat_id'],
-            'send_hour' => $payload['send_hour'],
-            'has_token' => $payload['bot_token'] !== '',
-            'bot_username' => $payload['bot_username'] ?: null,
-            'webhook_active' => $payload['bot_token'] !== '' && $webhookError === null,
-            'webhook_url' => $subscribers->webhookUrl(),
-            'webhook_error' => $webhookError,
+        return response()->json($payload + [
+            'bot_configured' => true,
+            'bot_username' => TelegramConfig::current()?->bot_username,
         ]);
     }
 
