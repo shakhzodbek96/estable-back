@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Enums\InventoryStatus;
 use Illuminate\Validation\Rule;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\BulkUpdateInventoryPriceRequest;
 use App\Http\Requests\Inventory\BulkStoreInventoryRequest;
 use App\Http\Requests\Inventory\StoreInventoryRequest;
 use App\Http\Requests\Inventory\UpdateInventoryRequest;
@@ -13,6 +14,7 @@ use App\Services\InventoryImportService;
 use App\Services\InventoryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -358,6 +360,145 @@ class InventoryController extends Controller
             ->get();
 
         return response()->json(['data' => $results]);
+    }
+
+    /**
+     * Model bo'yicha ommaviy narx yangilashdan oldin preview:
+     * o'sha product_id li in_stock donalar soni + joriy narx (selling/wholesale) oralig'i.
+     */
+    public function pricePreview(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'product_id' => ['required', 'integer', 'exists:products,id'],
+            'state' => ['nullable', 'in:new,used'],
+        ]);
+
+        $stats = Inventory::query()
+            ->where('product_id', $data['product_id'])
+            ->where('status', InventoryStatus::InStock)
+            ->when($request->input('state'), fn ($q, $state) => $q->where('state', $state))
+            ->selectRaw('
+                COUNT(*) as count,
+                MIN(selling_price) as min_selling_price,
+                MAX(selling_price) as max_selling_price,
+                MIN(wholesale_price) as min_wholesale_price,
+                MAX(wholesale_price) as max_wholesale_price
+            ')
+            ->first();
+
+        return response()->json([
+            'product_id' => $data['product_id'],
+            'count' => (int) $stats->count,
+            'selling_price' => [
+                'min' => $stats->min_selling_price !== null ? (float) $stats->min_selling_price : null,
+                'max' => $stats->max_selling_price !== null ? (float) $stats->max_selling_price : null,
+            ],
+            'wholesale_price' => [
+                'min' => $stats->min_wholesale_price !== null ? (float) $stats->min_wholesale_price : null,
+                'max' => $stats->max_wholesale_price !== null ? (float) $stats->max_wholesale_price : null,
+            ],
+        ]);
+    }
+
+    /**
+     * price-search / bulkUpdatePrice uchun umumiy filtr: status=in_stock
+     * + product_id / supply_batch_id / invoice_number (накладная, partial) / state / ids.
+     */
+    private function filteredInStockQuery(array $filters)
+    {
+        return Inventory::query()
+            ->where('status', InventoryStatus::InStock)
+            ->when($filters['product_id'] ?? null, fn ($q, $v) => $q->where('product_id', $v))
+            ->when($filters['supply_batch_id'] ?? null, fn ($q, $v) => $q->where('supply_batch_id', $v))
+            ->when($filters['invoice_number'] ?? null, fn ($q, $v) => $q->whereHas(
+                'supplyBatch',
+                fn ($sq) => $sq->where('invoice_number', 'ilike', "%{$v}%")
+            ))
+            ->when($filters['state'] ?? null, fn ($q, $v) => $q->where('state', $v))
+            ->when($filters['ids'] ?? null, fn ($q, $v) => $q->whereIn('id', $v));
+    }
+
+    /**
+     * Filtrlangan qidiruv — narx boshqarish sahifasi uchun (model/partiya/накладная/holat bo'yicha).
+     * Kamida bitta filtr talab qilinadi — butun sklad qaytmasligi uchun.
+     */
+    public function priceSearch(Request $request): JsonResponse
+    {
+        $filters = $request->validate([
+            'product_id' => ['nullable', 'integer', 'exists:products,id'],
+            'supply_batch_id' => ['nullable', 'integer', 'exists:supply_batches,id'],
+            'invoice_number' => ['nullable', 'string', 'max:255'],
+            'state' => ['nullable', 'in:new,used'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:500'],
+        ]);
+
+        if (!($filters['product_id'] ?? null) && !($filters['supply_batch_id'] ?? null) && !($filters['invoice_number'] ?? null) && !($filters['state'] ?? null)) {
+            return response()->json(['message' => 'Укажите хотя бы один фильтр'], 422);
+        }
+
+        $limit = min(max($filters['limit'] ?? 100, 1), 500);
+
+        $baseQuery = $this->filteredInStockQuery($filters);
+
+        $stats = (clone $baseQuery)->selectRaw('
+                COUNT(*) as count,
+                MIN(selling_price) as min_selling_price,
+                MAX(selling_price) as max_selling_price,
+                MIN(wholesale_price) as min_wholesale_price,
+                MAX(wholesale_price) as max_wholesale_price
+            ')
+            ->first();
+
+        $items = (clone $baseQuery)
+            ->with(['product:id,name', 'supplyBatch:id,invoice_number,batch_date'])
+            ->orderByDesc('id')
+            ->limit($limit)
+            ->get(['id', 'serial_number', 'product_id', 'state', 'selling_price', 'wholesale_price', 'supply_batch_id']);
+
+        $count = (int) $stats->count;
+
+        return response()->json([
+            'items' => $items,
+            'total_count' => $count,
+            'selling_price' => [
+                'min' => $count > 0 && $stats->min_selling_price !== null ? (float) $stats->min_selling_price : null,
+                'max' => $count > 0 && $stats->max_selling_price !== null ? (float) $stats->max_selling_price : null,
+            ],
+            'wholesale_price' => [
+                'min' => $count > 0 && $stats->min_wholesale_price !== null ? (float) $stats->min_wholesale_price : null,
+                'max' => $count > 0 && $stats->max_wholesale_price !== null ? (float) $stats->max_wholesale_price : null,
+            ],
+        ]);
+    }
+
+    /**
+     * Ommaviy narx yangilash — model/partiya/накладная/holat yoki aniq ID ro'yxati bo'yicha.
+     * Faqat selling_price / wholesale_price — purchase_price (tannarx) ga tegilmaydi.
+     * Faqat status=in_stock (sotilmagan) donalar yangilanadi.
+     */
+    public function bulkUpdatePrice(BulkUpdateInventoryPriceRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        $payload = [];
+        if (array_key_exists('selling_price', $data) && $data['selling_price'] !== null) {
+            $payload['selling_price'] = $data['selling_price'];
+        }
+        if (array_key_exists('wholesale_price', $data) && $data['wholesale_price'] !== null) {
+            $payload['wholesale_price'] = $data['wholesale_price'];
+        }
+
+        $updated = DB::transaction(function () use ($data, $payload) {
+            return $this->filteredInStockQuery($data)
+                ->lockForUpdate()
+                ->update($payload);
+        });
+
+        return response()->json([
+            'updated_count' => $updated,
+            'new_selling_price' => $data['selling_price'] ?? null,
+            'new_wholesale_price' => $data['wholesale_price'] ?? null,
+        ]);
     }
 
     public function byStatus(string $status): JsonResponse

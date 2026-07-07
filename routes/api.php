@@ -9,6 +9,7 @@ use App\Http\Controllers\Admin\InventoryImageController;
 use App\Http\Controllers\Admin\InvestorController;
 use App\Http\Controllers\Admin\PartnerController;
 use App\Http\Controllers\Admin\SupplierController;
+use App\Http\Controllers\Admin\SupplyBatchController;
 use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\ProductImageController;
 use App\Http\Controllers\Admin\RateController;
@@ -222,6 +223,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::apiResource('suppliers', SupplierController::class);
     Route::get('suppliers/{supplier}/batches', [SupplierController::class, 'batches']);
     Route::post('suppliers/{supplier}/payments', [SupplierController::class, 'storePayment']);
+    Route::get('supply-batches', [SupplyBatchController::class, 'index']);
     Route::apiResource('rates', RateController::class)->only(['index', 'store']);
 
     // POS skidka limitlari (faqat admin o'rnatadi)
@@ -241,6 +243,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     // Inventories
     Route::get('inventories/search', [InventoryController::class, 'search']);
     Route::get('inventories/by-status/{status}', [InventoryController::class, 'byStatus']);
+    Route::get('inventories/price-preview', [InventoryController::class, 'pricePreview']);
+    Route::get('inventories/price-search', [InventoryController::class, 'priceSearch']);
+    Route::post('inventories/bulk-update-price', [InventoryController::class, 'bulkUpdatePrice']);
     Route::post('inventories/bulk', [InventoryController::class, 'bulkStore']);
     Route::post('inventories/import', [InventoryController::class, 'import']);
     Route::get('inventories/import-template', [InventoryController::class, 'importTemplate']);
