@@ -22,17 +22,27 @@ class ShiftService
      */
     public function open(int $shopId, ?array $openingCash = null): CashShift
     {
-        if (CashShift::openForShop($shopId)) {
-            throw new \Exception('Для этого магазина уже открыта смена');
-        }
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($shopId, $openingCash) {
+            // Parallel ikki so'rov bir vaqtda smena ochmasligi uchun mavjud ochiq
+            // smenani qulflab tekshiramiz. Qat'iy kafolat — DB darajasidagi partial
+            // unique index (cash_shifts_one_open_per_shop).
+            $existing = CashShift::where('shop_id', $shopId)
+                ->where('status', ShiftStatus::Open)
+                ->lockForUpdate()
+                ->first();
 
-        return CashShift::create([
-            'shop_id' => $shopId,
-            'status' => ShiftStatus::Open,
-            'opened_by' => auth()->id(),
-            'opened_at' => now(),
-            'opening_cash' => $openingCash ?? ['usd' => 0, 'uzs' => 0],
-        ]);
+            if ($existing) {
+                throw new \Exception('Для этого магазина уже открыта смена');
+            }
+
+            return CashShift::create([
+                'shop_id' => $shopId,
+                'status' => ShiftStatus::Open,
+                'opened_by' => auth()->id(),
+                'opened_at' => now(),
+                'opening_cash' => $openingCash ?? ['usd' => 0, 'uzs' => 0],
+            ]);
+        });
     }
 
     /**
@@ -60,6 +70,16 @@ class ShiftService
             ->groupBy('currency')
             ->get();
 
+        // Naqд qaytarishlar (refund) — smenada mijozga naqd qaytarilgan pul.
+        // Refund tranzaksiyasi doim USD'da yoziladi (ReturnService::approve).
+        $refundsOut = (float) \App\Models\Transaction::where('shift_id', $shift->id)
+            ->where('type', \App\Enums\TransactionType::Refund)
+            ->where(function ($q) {
+                $q->where('details->refund_method', 'cash')
+                    ->orWhereNull('details->refund_method');
+            })
+            ->sum('amount');
+
         $opening = $shift->opening_cash ?? [];
         $expected = [
             'usd' => (float) ($opening['usd'] ?? 0),
@@ -78,6 +98,8 @@ class ShiftService
                 $expected[$cur] -= (float) $row->total;
             }
         }
+
+        $expected['usd'] -= $refundsOut;
 
         return ['usd' => round($expected['usd'], 2), 'uzs' => round($expected['uzs'], 2)];
     }

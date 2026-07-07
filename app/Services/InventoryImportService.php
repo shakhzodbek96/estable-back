@@ -2,9 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\AttributeScope;
+use App\Models\AttributeDefinition;
 use App\Services\Import\SpreadsheetParser;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
@@ -22,12 +25,22 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
  *   G — imei: serial_number (majburiy)
  *   H — imei 2: extra_serial_number (ixtiyoriy)
  *   I — note: notes (ixtiyoriy)
+ *
+ * J+ — dinamik atribut ustunlari (ixtiyoriy): ustun sarlavhasi atribut NOMI bilan
+ *      mos kelsa (masalan "Цвет", "Память"), o'sha ustundagi qiymatlar shu atributga
+ *      yoziladi. Sarlavha nomi topilmasa — ustun e'tiborsiz qoladi.
  */
 class InventoryImportService
 {
     private const HEADER_KEYWORDS = [
         'product', 'товар', 'tovar', 'наименование', 'имя',
     ];
+
+    /** Qat'iy (positional) ustunlar soni — undan keyingilari atribut ustunlari. */
+    private const FIXED_COLUMNS = 9;
+
+    /** Ko'pi bilan shuncha atribut ustuni o'qiladi (DoS oldini olish). */
+    private const MAX_ATTR_COLUMNS = 30;
 
     public function __construct(
         private SpreadsheetParser $parser,
@@ -40,22 +53,55 @@ class InventoryImportService
      */
     public function extractRichRows(UploadedFile $file): Collection
     {
-        $rows = $this->parser->parseRows($file, maxColumns: 9);
+        // Aktiv serial-atributlari: normalizatsiya qilingan nom → ta'rif.
+        $attrByName = AttributeDefinition::query()
+            ->active()
+            ->forScope(AttributeScope::Serial)
+            ->orderBy('id')
+            ->get()
+            ->keyBy(fn (AttributeDefinition $d) => $this->normalizeName($d->name));
+
+        $maxCols = self::FIXED_COLUMNS + self::MAX_ATTR_COLUMNS;
+        $rows = $this->parser->parseRows($file, maxColumns: $maxCols);
+
+        // Sarlavha satridan atribut ustunlarini aniqlash: [ustun_indeksi => ta'rif].
+        // Faqat birinchi satr sarlavha bo'lsa va nom atributga mos kelsa.
+        $attrColumns = [];
+        if (!empty($rows) && $attrByName->isNotEmpty() && $this->looksLikeHeader($rows[0])) {
+            for ($c = self::FIXED_COLUMNS; $c < $maxCols; $c++) {
+                $name = $this->normalizeName($this->parser->sanitizeCell((string) ($rows[0][$c] ?? '')));
+                if ($name !== '' && $attrByName->has($name)) {
+                    $attrColumns[$c] = $attrByName->get($name);
+                }
+            }
+        }
 
         return collect($rows)
-            ->map(fn ($row) => [
-                'product_name' => mb_substr($this->parser->sanitizeCell($row[0] ?? ''), 0, 255),
-                'purchase' => $this->parser->parseFloat($row[1] ?? null),
-                'price' => $this->parser->parseFloat($row[2] ?? null),
-                'retail' => ($row[3] !== null && $row[3] !== '')
-                    ? $this->parser->parseFloat($row[3])
-                    : null,
-                'condition' => $this->normalizeCondition($row[4] ?? null),
-                'has_box' => $this->normalizeBool($row[5] ?? null, default: true),
-                'imei' => mb_substr($this->parser->sanitizeCell($row[6] ?? ''), 0, 255),
-                'imei2' => mb_substr($this->parser->sanitizeCell($row[7] ?? ''), 0, 255) ?: null,
-                'note' => mb_substr($this->parser->sanitizeCell($row[8] ?? ''), 0, 1000) ?: null,
-            ])
+            ->map(function ($row) use ($attrColumns) {
+                // Dinamik atributlar — [{id, value}] (bo'sh yacheykalar tashlanadi).
+                $custom = [];
+                foreach ($attrColumns as $c => $def) {
+                    $raw = $this->parser->sanitizeCell((string) ($row[$c] ?? ''));
+                    if ($raw !== '') {
+                        $custom[] = ['id' => $def->id, 'value' => $raw];
+                    }
+                }
+
+                return [
+                    'product_name' => mb_substr($this->parser->sanitizeCell($row[0] ?? ''), 0, 255),
+                    'purchase' => $this->parser->parseFloat($row[1] ?? null),
+                    'price' => $this->parser->parseFloat($row[2] ?? null),
+                    'retail' => ($row[3] !== null && $row[3] !== '')
+                        ? $this->parser->parseFloat($row[3])
+                        : null,
+                    'condition' => $this->normalizeCondition($row[4] ?? null),
+                    'has_box' => $this->normalizeBool($row[5] ?? null, default: true),
+                    'imei' => mb_substr($this->parser->sanitizeCell($row[6] ?? ''), 0, 255),
+                    'imei2' => mb_substr($this->parser->sanitizeCell($row[7] ?? ''), 0, 255) ?: null,
+                    'note' => mb_substr($this->parser->sanitizeCell($row[8] ?? ''), 0, 1000) ?: null,
+                    'custom_attributes' => $custom,
+                ];
+            })
             ->filter(fn ($r) => $r['imei'] !== ''
                 && $r['product_name'] !== ''
                 // Sarlavha satrini avtomatik o'tkazib yuborish
@@ -63,6 +109,24 @@ class InventoryImportService
                 && !in_array(mb_strtolower($r['product_name']), self::HEADER_KEYWORDS, true))
             ->unique('imei')
             ->values();
+    }
+
+    /** Birinchi satr sarlavha ekanini aniqlaydi (product/imei kalit so'zlari bo'yicha). */
+    private function looksLikeHeader(array $row): bool
+    {
+        $a = mb_strtolower($this->parser->sanitizeCell((string) ($row[0] ?? '')));
+        $g = mb_strtolower($this->parser->sanitizeCell((string) ($row[6] ?? '')));
+
+        return in_array($a, self::HEADER_KEYWORDS, true)
+            || in_array($g, ['imei', 'imei 1', 'imei1', 'serial'], true);
+    }
+
+    /** Atribut nomini solishtirish uchun normalize: trim + bitta bo'shliq + lowercase. */
+    private function normalizeName(string $name): string
+    {
+        $n = preg_replace('/\s+/u', ' ', trim($name)) ?? '';
+
+        return mb_strtolower($n);
     }
 
     /** condition normalize: new/used, ya'ni har qanday boshqa qiymat → 'new' */
@@ -99,15 +163,28 @@ class InventoryImportService
         $sheet->setTitle('Inventory');
 
         $headers = ['product', 'purchase', 'price', 'retail', 'condition', 'box', 'imei', 'imei 2', 'note'];
-        foreach ($headers as $i => $h) {
-            $col = chr(ord('A') + $i);
+
+        // Dinamik atribut ustunlari: aktiv serial atributlarining NOMLARI sarlavha bo'ladi.
+        // Foydalanuvchi shu ustunlarga qiymat yozsa — import ularni atributga yozadi.
+        $attrNames = AttributeDefinition::query()
+            ->active()
+            ->forScope(AttributeScope::Serial)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->pluck('name')
+            ->all();
+
+        $allHeaders = array_merge($headers, $attrNames);
+        foreach ($allHeaders as $i => $h) {
+            $col = Coordinate::stringFromColumnIndex($i + 1);
             $sheet->setCellValue($col . '1', $h);
         }
-        $sheet->getStyle('A1:I1')->getFont()->setBold(true)->setSize(12);
-        $sheet->getStyle('A1:I1')->getFill()
+        $lastCol = Coordinate::stringFromColumnIndex(count($allHeaders));
+        $sheet->getStyle("A1:{$lastCol}1")->getFont()->setBold(true)->setSize(12);
+        $sheet->getStyle("A1:{$lastCol}1")->getFill()
             ->setFillType(Fill::FILL_SOLID)
             ->getStartColor()->setARGB('FFE0E7FF');
-        $sheet->getStyle('A1:I1')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("A1:{$lastCol}1")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
         $examples = [
             ['Macbook Air 13 inch M2 8/256GB',  560,  700,  670, 'used', 'no',  'J71732FYWK',   '', '1'],
@@ -133,6 +210,11 @@ class InventoryImportService
         foreach ($widths as $col => $w) {
             $sheet->getColumnDimension($col)->setWidth($w);
         }
+        // Atribut ustunlari kengligi
+        foreach (array_keys($attrNames) as $i) {
+            $col = Coordinate::stringFromColumnIndex(self::FIXED_COLUMNS + $i + 1);
+            $sheet->getColumnDimension($col)->setWidth(16);
+        }
 
         // Инструкция
         $info = $spreadsheet->createSheet();
@@ -150,6 +232,12 @@ class InventoryImportService
             '  G — imei      — IMEI / серийный номер (обязательно, уникально)',
             '  H — imei 2    — второй IMEI (опционально)',
             '  I — note      — заметка (опционально)',
+            '',
+            'Динамические атрибуты (опционально):',
+            '  Добавьте колонки после «note», где ЗАГОЛОВОК = название атрибута',
+            '  (например «Цвет», «Память»). Значения из этих колонок запишутся',
+            '  в соответствующий атрибут товара. Заголовки атрибутов уже добавлены',
+            '  в шаблон (если они настроены в разделе «Характеристики»).',
             '',
             'Магазин и инвестор выбираются в форме перед загрузкой файла.',
             'Если товар (product) не найден в системе, он создаётся',

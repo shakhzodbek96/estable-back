@@ -24,6 +24,7 @@ class Accessory extends Model
         'notes',
         'custom_attributes',
         'consignment_item_id',
+        'supply_batch_id',
         'shop_id',
         'investor_id',
         'is_active',
@@ -59,6 +60,11 @@ class Accessory extends Model
     public function consignmentItem(): BelongsTo
     {
         return $this->belongsTo(ConsignmentItem::class);
+    }
+
+    public function supplyBatch(): BelongsTo
+    {
+        return $this->belongsTo(SupplyBatch::class);
     }
 
     public function creator(): BelongsTo

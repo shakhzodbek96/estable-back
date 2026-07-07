@@ -8,6 +8,7 @@ use App\Http\Controllers\Admin\InventoryController;
 use App\Http\Controllers\Admin\InventoryImageController;
 use App\Http\Controllers\Admin\InvestorController;
 use App\Http\Controllers\Admin\PartnerController;
+use App\Http\Controllers\Admin\SupplierController;
 use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\ProductImageController;
 use App\Http\Controllers\Admin\RateController;
@@ -24,6 +25,7 @@ use App\Http\Controllers\Api\ShiftController;
 use App\Http\Controllers\Api\SaleScanController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\TgSubscriberController;
 use App\Http\Controllers\Api\ReturnController;
 use App\Http\Controllers\Api\InventoryStatusController;
 use App\Http\Controllers\Api\ConsignmentController;
@@ -218,6 +220,7 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::apiResource('products', ProductController::class);
     Route::apiResource('investors', InvestorController::class);
     Route::apiResource('partners', PartnerController::class);
+    Route::apiResource('suppliers', SupplierController::class);
     Route::apiResource('rates', RateController::class)->only(['index', 'store']);
 
     // POS skidka limitlari (faqat admin o'rnatadi)
@@ -228,6 +231,16 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
 
     // Do'kon ma'lumoti (faqat admin o'rnatadi)
     Route::put('settings/store-info', [SettingController::class, 'updateStoreInfo']);
+
+    // Telegram bot — kunlik hisobot + sotuv bildirishnomasi (faqat admin)
+    Route::get('settings/telegram', [SettingController::class, 'telegramConfig']);
+    Route::put('settings/telegram', [SettingController::class, 'updateTelegramConfig']);
+    Route::post('settings/telegram/send', [SettingController::class, 'sendTelegramNow']);
+
+    // Telegram obunachilar moduli (faqat admin)
+    Route::get('telegram/subscribers', [TgSubscriberController::class, 'index']);
+    Route::post('telegram/otp', [TgSubscriberController::class, 'generateOtp']);
+    Route::delete('telegram/subscribers/{tgUser}', [TgSubscriberController::class, 'destroy']);
 
     // Inventories
     Route::get('inventories/search', [InventoryController::class, 'search']);

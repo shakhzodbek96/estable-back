@@ -25,6 +25,13 @@ class BulkStoreInventoryRequest extends FormRequest
             'notes' => ['nullable', 'string'],
             'shop_id' => ['required', 'integer', 'exists:shops,id'],
             'investor_id' => ['nullable', 'integer', 'exists:investors,id'],
+            // Партия / Поставщик (ixtiyoriy). Nasiya (credit) faqat saqlangan postavshik bilan.
+            'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id', Rule::requiredIf(fn () => $this->input('payment_mode') === 'credit')],
+            'supplier_name' => ['nullable', 'string', 'max:255'],
+            'invoice_number' => ['nullable', 'string', 'max:255'],
+            'batch_date' => ['nullable', 'date'],
+            'payment_mode' => ['nullable', 'in:paid,credit'],
+            'batch_notes' => ['nullable', 'string', 'max:1000'],
             'serials' => ['required', 'array', 'min:1'],
             'serials.*.serial_number' => ['required', 'string', 'max:255', 'distinct', Rule::unique('inventories', 'serial_number')->where('status', InventoryStatus::InStock->value)],
             'serials.*.extra_serial_number' => ['nullable', 'string', 'max:255'],
@@ -46,6 +53,7 @@ class BulkStoreInventoryRequest extends FormRequest
         return [
             'serials.*.serial_number.unique' => 'IMEI :input уже есть на складе (в наличии).',
             'serials.*.serial_number.distinct' => 'IMEI :input дублируется в списке.',
+            'supplier_id.required' => 'Для покупки в долг выберите поставщика.',
         ];
     }
 }

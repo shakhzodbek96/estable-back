@@ -77,10 +77,15 @@ Schedule::call(function () {
 
 
 // ======================================================================
-// MISOL 3: Tenantga xos — Telegram kunlik hisobot (kelajak uchun)
+// Tenantga xos — Telegram kunlik hisobot
 // ----------------------------------------------------------------------
-// Agar keyinchalik Telegram bot qo'shilsa, har tenant admin'iga kunlik
-// savdo hisobotini yuboradigan task shunday yoziladi.
-//
-// Schedule::command('tenants:run telegram:daily-report')
-//     ->dailyAt('21:00');
+// Har SOAT har tenant uchun `telegram:daily-report` ishga tushadi. Komanda
+// tenant sozlamasidagi `send_hour`ni joriy soat (Asia/Tashkent) bilan
+// solishtiradi va faqat mos kelganda job dispatch qiladi. Shu tarzda har
+// tenant o'z yuborish vaqtini tanlaydi, bitta scheduler yozuvi kifoya.
+// ======================================================================
+
+Schedule::command('tenants:run telegram:daily-report')
+    ->name('telegram:daily-report')
+    ->hourly()
+    ->withoutOverlapping();

@@ -18,13 +18,24 @@ use Illuminate\Support\Facades\DB;
 class InventoryService
 {
     public function __construct(
-        private AttributeService $attributes
+        private AttributeService $attributes,
+        private SupplyBatchService $batches,
     ) {}
 
     public function createBatch(array $data): Collection
     {
         return DB::transaction(function () use ($data) {
             $inventories = collect();
+
+            // Партия (ixtiyoriy) — postavshik/manba berilsa yaratiladi.
+            $batch = $this->batches->createForIntake($data, $data['shop_id']);
+            $isCredit = $this->batches->isCredit($batch);
+
+            // Nasiya (credit) kirimida investor ishtirok etmaydi — mol postavshikdan
+            // qarzga olindi, do'kon egalik qiladi va qarzni o'zi to'laydi.
+            if ($isCredit) {
+                $data['investor_id'] = null;
+            }
 
             // Umumiy (default) narxlar — per-IMEI narx berilmagan qatorlar uchun.
             $defaultPurchase = (float) $data['purchase_price'];
@@ -60,17 +71,24 @@ class InventoryService
                     'state' => $data['state'] ?? 'new',
                     'notes' => $serial['notes'] ?? ($data['notes'] ?? null),
                     'custom_attributes' => $customAttributes,
+                    'consignment_item_id' => null,
+                    'supply_batch_id' => $batch?->id,
                     'shop_id' => $data['shop_id'],
                     'investor_id' => $data['investor_id'] ?? null,
                     'created_by' => auth()->id(),
                 ]));
             }
 
-            // Har qanday tovar kirimi xarajat sifatida Transaction (type=Purchase) yaratadi.
-            // Investor tanlangan bo'lsa — qo'shimcha Investment + investor.balance kamayadi.
-            // Investor tanlanmagan bo'lsa — do'kon xarajati (investor_id = null, shop_id orqali ajraladi).
+            // Partiya total_cost'ini yozamiz; nasiya bo'lsa postavshik qarzini oshiramiz.
+            if ($batch) {
+                $this->batches->finalize($batch, $totalCost);
+            }
 
-            if ($totalCost > 0) {
+            // Nasiya (credit) — kassadan chiqim YO'Q (pul keyin postavshikka to'lanadi).
+            // Darrov to'langan (paid) yoki partiyasiz — odatdagi Purchase Transaction.
+            // Investor tanlangan bo'lsa — qo'shimcha Investment + investor.balance kamayadi.
+
+            if (! $isCredit && $totalCost > 0) {
                 $rate = Rate::current();
                 $investorId = !empty($data['investor_id']) ? $data['investor_id'] : null;
 
@@ -255,6 +273,9 @@ class InventoryService
             $totalCost = 0.0;
 
             foreach ($data['rows'] as $row) {
+                // Dinamik atributlar — har qator uchun alohida snapshot (import ustunlaridan).
+                $customAttributes = $this->attributes->snapshot($row['custom_attributes'] ?? null, AttributeScope::Serial);
+
                 $inv = Inventory::create([
                     'product_id' => $row['product_id'],
                     'serial_number' => $row['serial_number'],
@@ -267,6 +288,7 @@ class InventoryService
                     'has_box' => $row['has_box'] ?? true,
                     'state' => $row['state'] ?? 'new',
                     'notes' => $row['notes'] ?? null,
+                    'custom_attributes' => $customAttributes,
                     'shop_id' => $data['shop_id'],
                     'investor_id' => $data['investor_id'] ?? null,
                     'created_by' => auth()->id(),

@@ -30,6 +30,7 @@ class Inventory extends Model
         'state',
         'custom_attributes',
         'consignment_item_id',
+        'supply_batch_id',
         'shop_id',
         'investor_id',
         'created_by',
@@ -99,6 +100,11 @@ class Inventory extends Model
     public function consignmentItem(): BelongsTo
     {
         return $this->belongsTo(ConsignmentItem::class);
+    }
+
+    public function supplyBatch(): BelongsTo
+    {
+        return $this->belongsTo(SupplyBatch::class);
     }
 
     public function creator(): BelongsTo

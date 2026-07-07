@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\InventoryStatus;
 use App\Enums\SalePaymentStatus;
+use App\Jobs\SendSaleTelegramNotification;
 use App\Models\Accessory;
 use App\Models\Customer;
 use App\Models\Inventory;
@@ -37,8 +38,11 @@ class SaleService
 
             // Smena majburiy — ochiq smena bo'lmasa savdo qilib bo'lmaydi.
             // Aks holda yig'ilган naqд hech qaysi smena сверка'siga kirmaydi.
+            // Smenani BIR marta o'qib, ID'sini to'lovlarga uzatamiz — tekshiruv va
+            // yozish orasida smena yopilsa to'lov shift_id=NULL bo'lib qolmasligi uchun.
             $shopId = $this->determineShop($data['items']);
-            if (! \App\Models\CashShift::openForShop($shopId)) {
+            $shift = \App\Models\CashShift::openForShop($shopId);
+            if (! $shift) {
                 throw new \Exception('Откройте смену перед продажей');
             }
 
@@ -57,10 +61,17 @@ class SaleService
             }
 
             foreach ($data['payments'] as $payment) {
-                $this->createSalePayment($sale, $payment);
+                $this->createSalePayment($sale, $payment, $shift->id);
             }
 
-            return $sale->load(['items.inventory.product', 'items.accessory.product', 'payments', 'customer']);
+            $sale->load(['items.inventory.product', 'items.accessory.product', 'payments', 'customer']);
+
+            // POS sotuvidan keyin Telegram kanaliga bildirishnoma.
+            // afterCommit() — job faqat tranzaksiya commit bo'lgach navbatga tushadi
+            // (worker sotuvni o'qiy olishi uchun). ID uzatamiz, instance EMAS.
+            SendSaleTelegramNotification::dispatch($sale->id)->afterCommit();
+
+            return $sale;
         });
     }
 
@@ -147,14 +158,14 @@ class SaleService
         return $saleItem;
     }
 
-    private function createSalePayment(Sale $sale, array $payment): SalePayment
+    private function createSalePayment(Sale $sale, array $payment, int $shiftId): SalePayment
     {
         $rate = Rate::current();
 
         return SalePayment::create([
             'sale_id' => $sale->id,
             'shop_id' => $sale->shop_id,
-            'shift_id' => \App\Models\CashShift::openForShop($sale->shop_id)?->id,
+            'shift_id' => $shiftId,
             'amount' => $payment['amount'],
             'type' => $payment['type'],
             'rate' => $payment['rate'] ?? $rate?->rate ?? 0,

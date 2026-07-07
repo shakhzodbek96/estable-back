@@ -4,8 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Setting;
+use App\Services\TelegramReportService;
+use App\Services\TelegramService;
+use App\Services\TgSubscriberService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class SettingController extends Controller
@@ -109,6 +113,122 @@ class SettingController extends Controller
         Setting::setValue(Setting::STORE_INFO, $payload);
 
         return response()->json($payload);
+    }
+
+    /**
+     * Telegram bot konfiguratsiyasi (faqat admin o'qiydi).
+     * Token XAVFSIZLIK uchun qaytarilmaydi — faqat o'rnatilgan/yo'qligi (has_token).
+     */
+    public function telegramConfig(TelegramReportService $service, TgSubscriberService $subscribers): JsonResponse
+    {
+        $cfg = $service->config();
+
+        return response()->json([
+            'enabled' => $cfg['enabled'],
+            'notify_on_sale' => $cfg['notify_on_sale'],
+            'chat_id' => $cfg['chat_id'],
+            'send_hour' => $cfg['send_hour'],
+            'has_token' => $cfg['bot_token'] !== '',
+            'bot_username' => $cfg['bot_username'] ?: null,
+            'webhook_active' => $cfg['bot_token'] !== '' && $cfg['webhook_secret'] !== '',
+            'webhook_url' => $subscribers->webhookUrl(),
+        ]);
+    }
+
+    /**
+     * Telegram bot konfiguratsiyasini yangilaydi (faqat admin).
+     * bot_token faqat yangi (bo'sh bo'lmagan) qiymat kelganda yangilanadi —
+     * bo'sh kelsa eski token saqlanadi (frontend har safar token so'ramasin).
+     */
+    public function updateTelegramConfig(
+        Request $request,
+        TelegramService $telegram,
+        TgSubscriberService $subscribers,
+    ): JsonResponse {
+        $data = $request->validate([
+            'enabled' => ['required', 'boolean'],
+            'notify_on_sale' => ['required', 'boolean'],
+            'chat_id' => ['nullable', 'string', 'max:100'],
+            'send_hour' => ['required', 'integer', 'min:0', 'max:23'],
+            'bot_token' => ['nullable', 'string', 'max:100'],
+        ], [], [
+            'chat_id' => 'Chat ID',
+            'send_hour' => 'Час отправки',
+            'bot_token' => 'Токен бота',
+        ]);
+
+        $current = Setting::getValue(Setting::TELEGRAM_BOT_CONFIG, []);
+        $current = is_array($current) ? $current : [];
+
+        $newToken = trim((string) ($data['bot_token'] ?? ''));
+        $tokenChanged = $newToken !== '';
+        $token = $tokenChanged
+            ? $newToken
+            : (is_string($current['bot_token'] ?? null) ? $current['bot_token'] : '');
+
+        // Webhook secret — bir marta generatsiya qilinadi va saqlanadi
+        $secret = is_string($current['webhook_secret'] ?? null) && $current['webhook_secret'] !== ''
+            ? $current['webhook_secret']
+            : Str::random(48);
+
+        // Bot username — token o'zgargan bo'lsa yoki hali aniqlanmagan bo'lsa getMe orqali olamiz
+        $botUsername = is_string($current['bot_username'] ?? null) ? $current['bot_username'] : '';
+        if ($token !== '' && ($tokenChanged || $botUsername === '')) {
+            $info = $telegram->getBotInfo($token);
+            $botUsername = $info['username'] ?? $botUsername;
+        }
+
+        $payload = [
+            'enabled' => (bool) $data['enabled'],
+            'notify_on_sale' => (bool) $data['notify_on_sale'],
+            'chat_id' => trim((string) ($data['chat_id'] ?? '')),
+            'send_hour' => (int) $data['send_hour'],
+            'bot_token' => $token,
+            'bot_username' => $botUsername,
+            'webhook_secret' => $secret,
+        ];
+
+        Setting::setValue(Setting::TELEGRAM_BOT_CONFIG, $payload);
+
+        // Token bor bo'lsa — webhook'ni o'rnatamiz (obunachi qo'shilishi uchun shart)
+        $webhookError = null;
+        if ($token !== '') {
+            $res = $subscribers->ensureWebhook();
+            if (! ($res['ok'] ?? false)) {
+                $webhookError = $res['error'] ?? null;
+            }
+        }
+
+        return response()->json([
+            'enabled' => $payload['enabled'],
+            'notify_on_sale' => $payload['notify_on_sale'],
+            'chat_id' => $payload['chat_id'],
+            'send_hour' => $payload['send_hour'],
+            'has_token' => $payload['bot_token'] !== '',
+            'bot_username' => $payload['bot_username'] ?: null,
+            'webhook_active' => $payload['bot_token'] !== '' && $webhookError === null,
+            'webhook_url' => $subscribers->webhookUrl(),
+            'webhook_error' => $webhookError,
+        ]);
+    }
+
+    /**
+     * Hisobotni HOZIR yuboradi (sinov / qo'lda yuborish tugmasi).
+     * Sinxron — foydalanuvchi darhol natijani ko'radi.
+     */
+    public function sendTelegramNow(TelegramReportService $service): JsonResponse
+    {
+        $result = $service->sendDailyReport();
+
+        if ($result['ok'] ?? false) {
+            return response()->json(['ok' => true, 'message' => 'Отчёт отправлен']);
+        }
+
+        if ($result['skipped'] ?? false) {
+            return response()->json(['ok' => false, 'message' => 'Отправка отчётов выключена'], 422);
+        }
+
+        return response()->json(['ok' => false, 'message' => $result['error'] ?? 'Не удалось отправить отчёт'], 422);
     }
 
     /** Do'kon ma'lumoti standart qiymatlari */

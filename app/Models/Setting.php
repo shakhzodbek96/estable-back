@@ -22,6 +22,9 @@ class Setting extends Model
     // Public landing uchun do'kon ma'lumoti: ['name', 'about', 'phone', 'telegram', 'instagram']
     public const STORE_INFO = 'store_info';
 
+    // Telegram bot orqali kunlik hisobot: ['enabled', 'bot_token', 'chat_id', 'send_hour']
+    public const TELEGRAM_BOT_CONFIG = 'telegram_bot_config';
+
     protected $fillable = [
         'key',
         'payload',

@@ -49,8 +49,14 @@ class AccessoryController extends Controller
             $query->where('shop_id', $shopId);
         }
 
-        if ($investorId = $request->integer('investor_id')) {
-            $query->where('investor_id', $investorId);
+        // investor_id: raqam → o'sha investor; 'none' → investorsiz (NULL) zaxira.
+        if ($request->filled('investor_id')) {
+            $investorId = $request->input('investor_id');
+            if ($investorId === 'none') {
+                $query->whereNull('investor_id');
+            } elseif (is_numeric($investorId)) {
+                $query->where('investor_id', (int) $investorId);
+            }
         }
 
         $perPage = max(1, min($request->integer('per_page', 15), 100));

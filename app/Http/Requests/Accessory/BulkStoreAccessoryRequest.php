@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Accessory;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * Bir nechta aksessuar partiyasini bitta so'rov bilan yaratish.
@@ -35,6 +36,12 @@ class BulkStoreAccessoryRequest extends FormRequest
             'shop_id' => ['required', 'integer', 'exists:shops,id'],
             'invoice_number' => ['required', 'string', 'max:255'],
             'investor_id' => ['nullable', 'integer', 'exists:investors,id'],
+            // Партия / Поставщик (ixtiyoriy). Nasiya (credit) faqat saqlangan postavshik bilan.
+            'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id', Rule::requiredIf(fn () => $this->input('payment_mode') === 'credit')],
+            'supplier_name' => ['nullable', 'string', 'max:255'],
+            'batch_date' => ['nullable', 'date'],
+            'payment_mode' => ['nullable', 'in:paid,credit'],
+            'batch_notes' => ['nullable', 'string', 'max:1000'],
 
             // Batches array
             'batches' => ['required', 'array', 'min:1'],
@@ -55,6 +62,7 @@ class BulkStoreAccessoryRequest extends FormRequest
     {
         return [
             'batches.*.barcode.distinct' => 'Штрих-код :input дублируется в списке.',
+            'supplier_id.required' => 'Для покупки в долг выберите поставщика.',
         ];
     }
 }

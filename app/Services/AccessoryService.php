@@ -16,7 +16,8 @@ use Illuminate\Support\Facades\DB;
 class AccessoryService
 {
     public function __construct(
-        private AttributeService $attributes
+        private AttributeService $attributes,
+        private SupplyBatchService $batches,
     ) {}
 
     /**
@@ -36,6 +37,15 @@ class AccessoryService
             $accessories = collect();
             $totalCost = 0.0;
 
+            // Партия (ixtiyoriy) — postavshik/manba berilsa yaratiladi.
+            $supplyBatch = $this->batches->createForIntake($data, $data['shop_id']);
+            $isCredit = $this->batches->isCredit($supplyBatch);
+
+            // Nasiya kirimida investor ishtirok etmaydi (mol qarzga olindi).
+            if ($isCredit) {
+                $data['investor_id'] = null;
+            }
+
             // Dinamik xususiyatlar — barcha partiyalarga umumiy snapshot
             $customAttributes = $this->attributes->snapshot($data['custom_attributes'] ?? null, AttributeScope::Bulk);
 
@@ -53,6 +63,7 @@ class AccessoryService
                     'wholesale_price' => $batch['wholesale_price'] ?? null,
                     'notes' => $batch['notes'] ?? null,
                     'custom_attributes' => $customAttributes,
+                    'supply_batch_id' => $supplyBatch?->id,
                     'shop_id' => $data['shop_id'],
                     'investor_id' => $data['investor_id'] ?? null,
                     'is_active' => true,
@@ -63,7 +74,13 @@ class AccessoryService
                 $totalCost += (float) $batch['purchase_price'] * (int) $batch['quantity'];
             }
 
-            if ($totalCost > 0) {
+            // Partiya total_cost + nasiya qarzi.
+            if ($supplyBatch) {
+                $this->batches->finalize($supplyBatch, $totalCost);
+            }
+
+            // Nasiya — kassadan chiqim YO'Q (keyin postavshikka to'lanadi).
+            if (! $isCredit && $totalCost > 0) {
                 $rate = Rate::current();
                 $investorId = !empty($data['investor_id']) ? $data['investor_id'] : null;
 

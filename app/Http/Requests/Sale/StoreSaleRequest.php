@@ -30,15 +30,16 @@ class StoreSaleRequest extends FormRequest
             'payments.*.type' => ['required', 'string', 'in:cash,card,p2p'],
             'payments.*.amount' => ['required', 'numeric', 'min:0.01'],
             'payments.*.currency' => ['nullable', 'string', 'in:usd,uzs'],
-            'payments.*.rate' => ['nullable', 'numeric', 'min:0'],
+            'payments.*.rate' => ['nullable', 'numeric', 'min:0', 'required_if:payments.*.currency,uzs'],
             'payments.*.comment' => ['nullable', 'string', 'max:500'],
 
-            // P2P uchun qo'shimcha ma'lumotlar (audit uchun):
+            // P2P uchun qo'shimcha ma'lumotlar (audit uchun) — UI talab qiladi,
+            // server ham majburlaydi (to'g'ridan-to'g'ri API chaqiruviga qarshi):
             //   - card_last4: karta oxirgi 4 raqami
             //   - time: to'lov vaqti (hh:mm)
-            'payments.*.details' => ['nullable', 'array'],
-            'payments.*.details.card_last4' => ['nullable', 'string', 'regex:/^\d{4}$/'],
-            'payments.*.details.time' => ['nullable', 'string', 'regex:/^\d{2}:\d{2}$/'],
+            'payments.*.details' => ['nullable', 'array', 'required_if:payments.*.type,p2p'],
+            'payments.*.details.card_last4' => ['nullable', 'string', 'regex:/^\d{4}$/', 'required_if:payments.*.type,p2p'],
+            'payments.*.details.time' => ['nullable', 'string', 'regex:/^\d{2}:\d{2}$/', 'required_if:payments.*.type,p2p'],
         ];
     }
 

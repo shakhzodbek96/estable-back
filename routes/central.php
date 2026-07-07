@@ -4,6 +4,7 @@ use App\Http\Controllers\Central\AdminAuthController;
 use App\Http\Controllers\Central\AdminUserController;
 use App\Http\Controllers\Central\DashboardController;
 use App\Http\Controllers\Central\HealthController;
+use App\Http\Controllers\Central\TelegramWebhookController;
 use App\Http\Controllers\Central\TenantController;
 use Illuminate\Support\Facades\Route;
 
@@ -29,6 +30,10 @@ Route::get('ping', function () {
         'timestamp' => now()->toIso8601String(),
     ]);
 });
+
+// Telegram webhook (public) — tenant URL yo'lidan aniqlanadi, secret header bilan himoyalanadi.
+// Telegram bu URL'ga har tenant boti uchun POST yuboradi (setWebhook orqali o'rnatiladi).
+Route::post('telegram/webhook/{tenant}', [TelegramWebhookController::class, 'handle']);
 
 // Auth (public)
 Route::prefix('auth')->group(function () {

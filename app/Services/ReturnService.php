@@ -79,23 +79,27 @@ class ReturnService
      */
     public function approve(Return_ $return): Return_
     {
-        if ($return->status !== ReturnStatus::Pending) {
-            throw new \Exception("Faqat kutilayotgan qaytarishni tasdiqlash mumkin");
-        }
-
-        // Belt-and-suspenders: tasdiqlash paytida ham sotuv kassada tasdiqlangan bo'lishi shart
-        // (create() dan keyin to'lov bekor qilingan bo'lishi mumkin).
-        $this->assertSaleConfirmed($return->sale_id);
-
-        // Obmen (ExchangeSame/ExchangeDifferent) hozircha hisob-kitobni amalga oshirmaydi:
-        // original sotuv krediti teskari hisoblanmaydi, price_difference va yangi sotuv (new_sale_id)
-        // yozilmaydi. Jim "yarim ishlash" o'rniga aniq bloklaymiz — to'liq qo'llab-quvvatlash
-        // alohida funksional sifatida qo'shilishi kerak (qaytarish + yangi sotuv rasmiylashtirish).
-        if (in_array($return->return_type, [ReturnType::ExchangeSame, ReturnType::ExchangeDifferent], true)) {
-            throw new \Exception('Обмен товара пока не поддерживается в учёте. Оформите возврат, затем новую продажу.');
-        }
-
         return DB::transaction(function () use ($return) {
+            // Parallel ikki marta tasdiqlashga qarshi: qatorni qulflab, statusni
+            // tranzaksiya ICHIDA qayta tekshiramiz (aks holda double-refund mumkin).
+            $return = Return_::whereKey($return->id)->lockForUpdate()->firstOrFail();
+
+            if ($return->status !== ReturnStatus::Pending) {
+                throw new \Exception("Faqat kutilayotgan qaytarishni tasdiqlash mumkin");
+            }
+
+            // Belt-and-suspenders: tasdiqlash paytida ham sotuv kassada tasdiqlangan bo'lishi shart
+            // (create() dan keyin to'lov bekor qilingan bo'lishi mumkin).
+            $this->assertSaleConfirmed($return->sale_id);
+
+            // Obmen (ExchangeSame/ExchangeDifferent) hozircha hisob-kitobni amalga oshirmaydi:
+            // original sotuv krediti teskari hisoblanmaydi, price_difference va yangi sotuv (new_sale_id)
+            // yozilmaydi. Jim "yarim ishlash" o'rniga aniq bloklaymiz — to'liq qo'llab-quvvatlash
+            // alohida funksional sifatida qo'shilishi kerak (qaytarish + yangi sotuv rasmiylashtirish).
+            if (in_array($return->return_type, [ReturnType::ExchangeSame, ReturnType::ExchangeDifferent], true)) {
+                throw new \Exception('Обмен товара пока не поддерживается в учёте. Оформите возврат, затем новую продажу.');
+            }
+
             $return->update([
                 'status' => ReturnStatus::Completed,
                 'approved_by' => auth()->id(),
@@ -136,14 +140,18 @@ class ReturnService
 
                 $saleItem->inventory->update($updateData);
             } elseif ($saleItem->item_type->value === 'bulk' && $saleItem->accessory) {
+                // Miqdor yangilashdan oldin qatorni qulflaymiz — parallel qaytarish/sotuv
+                // bilan sold_quantity ustida lost-update bo'lmasligi uchun.
+                $lockedAccessory = $saleItem->accessory()->lockForUpdate()->first();
+
                 // Faqat qaytarilgan miqdorni qaytaramiz (qisman qaytarishni qo'llab-quvvatlash)
-                $saleItem->accessory->decrement('sold_quantity', $qty);
+                $lockedAccessory->decrement('sold_quantity', $qty);
 
                 if ($return->item_condition === ItemCondition::DefectiveUnusable) {
-                    $saleItem->accessory->decrement('quantity', $qty);
+                    $lockedAccessory->decrement('quantity', $qty);
                 }
 
-                $accessory = $saleItem->accessory->fresh();
+                $accessory = $lockedAccessory->fresh();
                 $available = $accessory->quantity - $accessory->sold_quantity - $accessory->consigned_quantity;
                 if ($available > 0 && !$accessory->is_active) {
                     $accessory->update(['is_active' => true]);
@@ -158,6 +166,11 @@ class ReturnService
             if ($return->return_type === ReturnType::Refund && $return->refund_amount > 0) {
                 $rate = Rate::current();
 
+                // Refund'ni joriy ochiq smenaga bog'laymiz — kassa сверка (expectedCash)
+                // naqd qaytarilgan pulni hisobga olishi uchun. Smena ochiq bo'lmasa null
+                // (qaytarish smenasiz ham tasdiqlanishi mumkin — masalan, karta orqali).
+                $openShift = \App\Models\CashShift::openForShop($return->shop_id);
+
                 $refundTransaction = Transaction::create([
                     'amount' => $return->refund_amount,
                     'currency' => 'usd',
@@ -166,12 +179,14 @@ class ReturnService
                     'type' => TransactionType::Refund,
                     'transaction_date' => now()->toDateString(),
                     'shop_id' => $return->shop_id,
+                    'shift_id' => $openShift?->id,
                     'investor_id' => $return->transfers_to_shop ? null : $investorId,
                     'created_by' => $return->created_by,
                     'accepted_by' => auth()->id(),
                     'details' => [
                         'return_id' => $return->id,
                         'sale_id' => $return->sale_id,
+                        'refund_method' => $return->refund_method,
                     ],
                 ]);
 
