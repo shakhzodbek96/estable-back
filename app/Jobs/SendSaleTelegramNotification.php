@@ -2,10 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\InteractsWithTelegramRetry;
 use App\Services\TelegramReportService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Log;
 
 /**
  * POS sotuvi amalga oshgach, tenant Telegram kanaliga bitta sotuv haqida
@@ -15,14 +15,17 @@ use Illuminate\Support\Facades\Log;
  * ya'ni faqat sotuv tranzaksiyasi commit bo'lgach navbatga tushadi (worker
  * sotuvni o'qiy olishi kafolatlanadi). Sotuv ID uzatiladi, instance EMAS
  * (tenant-aware queue + serializatsiya qoidasi).
+ *
+ * 429 (rate limit) va 5xx uchun retry — InteractsWithTelegramRetry.
  */
 class SendSaleTelegramNotification implements ShouldQueue
 {
+    use InteractsWithTelegramRetry;
     use Queueable;
 
-    public int $tries = 3;
+    public int $tries = 6;
 
-    public int $backoff = 30;
+    public array $backoff = [10, 30, 60, 120];
 
     public function __construct(public int $saleId)
     {
@@ -31,12 +34,6 @@ class SendSaleTelegramNotification implements ShouldQueue
     public function handle(TelegramReportService $service): void
     {
         $result = $service->sendSaleNotification($this->saleId);
-
-        if (! ($result['ok'] ?? false) && ! ($result['skipped'] ?? false)) {
-            Log::warning(
-                '[Telegram] sale notification failed (sale ' . $this->saleId . '): '
-                . ($result['error'] ?? 'unknown')
-            );
-        }
+        $this->handleTelegramResult($result, 'sale ' . $this->saleId);
     }
 }

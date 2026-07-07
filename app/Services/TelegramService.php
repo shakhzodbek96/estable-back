@@ -18,7 +18,12 @@ class TelegramService
     /**
      * Kanal/guruhga HTML matnli xabar yuboradi.
      *
-     * @return array{ok: bool, error: string|null}
+     * Natija (queue job retry logikasi uchun ham):
+     *  - retry_after — 429 (rate limit) bo'lsa, shuncha soniyadan keyin qayta urinish kerak
+     *  - retryable   — vaqtinchalik xato (network / 5xx) — qayta urinsa bo'ladi
+     *  - status      — HTTP status kodi
+     *
+     * @return array{ok: bool, error: string|null, retry_after?: int, retryable?: bool, status?: int}
      */
     public function sendMessage(string $token, string $chatId, string $text): array
     {
@@ -32,18 +37,28 @@ class TelegramService
                     'disable_web_page_preview' => true,
                 ]);
         } catch (\Throwable $e) {
+            // Tarmoq uzilishi / timeout — vaqtinchalik, qayta urinsa bo'ladi
             Log::warning('[Telegram] sendMessage exception: ' . $e->getMessage());
-            return ['ok' => false, 'error' => 'Не удалось связаться с Telegram. Проверьте интернет.'];
+            return ['ok' => false, 'error' => 'Не удалось связаться с Telegram.', 'retryable' => true];
         }
 
         if ($res->successful() && $res->json('ok') === true) {
             return ['ok' => true, 'error' => null];
         }
 
-        $desc = (string) ($res->json('description') ?? ('HTTP ' . $res->status()));
-        Log::warning('[Telegram] sendMessage failed: ' . $desc);
+        $status = $res->status();
+        $desc = (string) ($res->json('description') ?? ('HTTP ' . $status));
+        $retryAfter = (int) ($res->json('parameters.retry_after') ?? 0);
 
-        return ['ok' => false, 'error' => $this->humanError($desc)];
+        Log::warning("[Telegram] sendMessage failed (HTTP {$status}): {$desc}");
+
+        return [
+            'ok' => false,
+            'error' => $this->humanError($desc),
+            'retry_after' => $retryAfter,      // 429 → > 0
+            'retryable' => $status >= 500,     // 5xx — vaqtinchalik server xatosi
+            'status' => $status,
+        ];
     }
 
     /**

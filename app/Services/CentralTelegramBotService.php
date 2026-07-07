@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Jobs\SendTelegramMessage;
 use App\Models\TelegramConfig;
 use App\Models\TgUser;
 
@@ -108,7 +109,8 @@ class CentralTelegramBotService
             ? "\n\nСкопируйте этот ID и вставьте его в настройках вашего магазина."
             : "\n\nСкопируйте этот ID чата и вставьте его в настройках магазина, чтобы получать сюда отчёты.";
 
-        $this->telegram->sendMessage($token, $chatId, $text);
+        // Webhook tez javob berishi uchun yuborishni navbatga qo'yamiz (429 retry job'da)
+        SendTelegramMessage::dispatch($chatId, $text, $token);
     }
 
     /** Update'dan ism/username/type ni ajratib oladi. */

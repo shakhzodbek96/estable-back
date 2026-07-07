@@ -2,10 +2,10 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\InteractsWithTelegramRetry;
 use App\Services\TelegramReportService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
-use Illuminate\Support\Facades\Log;
 
 /**
  * Kunlik Telegram hisobotini yuboradigan queue job.
@@ -15,16 +15,17 @@ use Illuminate\Support\Facades\Log;
  * tenant_id qo'yadi va worker handle()'ni o'sha tenant kontekstida ishga tushiradi.
  * Shu sabab bu yerda tenant instance/ID uzatilmaydi — Setting va ReportService
  * avtomatik tenant schema'sida ishlaydi.
+ *
+ * 429 (rate limit) va 5xx uchun retry — InteractsWithTelegramRetry.
  */
 class SendTelegramDailyReport implements ShouldQueue
 {
+    use InteractsWithTelegramRetry;
     use Queueable;
 
-    /** Xatolikda 3 martagacha urinish (Telegram 429 / vaqtincha uzilish uchun). */
-    public int $tries = 3;
+    public int $tries = 6;
 
-    /** Urinishlar orasida 60 soniya kutish. */
-    public int $backoff = 60;
+    public array $backoff = [10, 30, 60, 120];
 
     public function __construct(
         public ?string $dateFrom = null,
@@ -35,9 +36,6 @@ class SendTelegramDailyReport implements ShouldQueue
     public function handle(TelegramReportService $service): void
     {
         $result = $service->sendDailyReport($this->dateFrom, $this->dateTo);
-
-        if (! ($result['ok'] ?? false) && ! ($result['skipped'] ?? false)) {
-            Log::warning('[Telegram] daily report failed: ' . ($result['error'] ?? 'unknown'));
-        }
+        $this->handleTelegramResult($result, 'daily report');
     }
 }
