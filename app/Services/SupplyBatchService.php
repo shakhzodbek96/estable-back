@@ -69,4 +69,31 @@ class SupplyBatchService
     {
         return $batch !== null && $batch->payment_mode === 'credit';
     }
+
+    /**
+     * Item (Inventory/Accessory) o'chirilganda chaqiriladi — agar item nasiya
+     * partiyasidan bo'lsa, postavshik qarzini (balance) va partiya total_cost'ini
+     * o'chirilgan item narxiga kamaytiradi. Aks holda qarz noto'g'ri ("shishgan")
+     * qolib ketardi. Investor bilan moliyalashgan item'larda ishlatilmaydi —
+     * bunday item credit partiyaga tegishli bo'la olmaydi (createForIntake'da
+     * investor_id credit uchun null qilinadi).
+     */
+    public function reverseCreditForItem(?int $supplyBatchId, float $contribution): void
+    {
+        if (! $supplyBatchId || $contribution <= 0) {
+            return;
+        }
+
+        $batch = SupplyBatch::find($supplyBatchId);
+        if (! $batch || $batch->payment_mode !== 'credit' || ! $batch->supplier_id) {
+            return;
+        }
+
+        $contribution = round($contribution, 2);
+
+        Supplier::whereKey($batch->supplier_id)->lockForUpdate()->decrement('balance', $contribution);
+
+        $batch->total_cost = max(0, (float) $batch->total_cost - $contribution);
+        $batch->save();
+    }
 }

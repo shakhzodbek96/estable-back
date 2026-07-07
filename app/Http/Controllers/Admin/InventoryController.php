@@ -165,6 +165,14 @@ class InventoryController extends Controller
             ],
             'shop_id' => ['required', 'integer', 'exists:shops,id'],
             'investor_id' => ['nullable', 'integer', 'exists:investors,id'],
+            // Партия / Поставщик (ixtiyoriy, butun faylga bitta) — накладная, sana, to'lov rejimi.
+            'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id', Rule::requiredIf(fn () => $request->input('payment_mode') === 'credit')],
+            'supplier_name' => ['nullable', 'string', 'max:255'],
+            'invoice_number' => ['nullable', 'string', 'max:255'],
+            'batch_date' => ['nullable', 'date'],
+            'payment_mode' => ['nullable', 'in:paid,credit'],
+        ], [
+            'supplier_id.required' => 'Для покупки в долг выберите поставщика.',
         ]);
 
         try {
@@ -297,6 +305,11 @@ class InventoryController extends Controller
         $created = $this->inventoryService->createRichBatch([
             'shop_id' => $data['shop_id'],
             'investor_id' => $data['investor_id'] ?? null,
+            'supplier_id' => $data['supplier_id'] ?? null,
+            'supplier_name' => $data['supplier_name'] ?? null,
+            'invoice_number' => $data['invoice_number'] ?? null,
+            'batch_date' => $data['batch_date'] ?? null,
+            'payment_mode' => $data['payment_mode'] ?? null,
             'rows' => $richRows->all(),
         ]);
 

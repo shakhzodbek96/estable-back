@@ -3,14 +3,21 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\StoreSupplierPaymentRequest;
 use App\Http\Requests\Admin\StoreSupplierRequest;
 use App\Http\Requests\Admin\UpdateSupplierRequest;
 use App\Models\Supplier;
+use App\Models\SupplyBatch;
+use App\Services\SupplierPaymentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class SupplierController extends Controller
 {
+    public function __construct(
+        private SupplierPaymentService $paymentService,
+    ) {}
+
     public function index(Request $request): JsonResponse
     {
         $query = Supplier::query()->withCount('batches');
@@ -53,11 +60,51 @@ class SupplierController extends Controller
         return response()->json($supplier);
     }
 
+    /**
+     * Postavshik kabineti — накладные (партии) va ularga kirgan tovarlar (IMEI/aksessuar) ro'yxati.
+     */
+    public function batches(Supplier $supplier, Request $request): JsonResponse
+    {
+        $perPage = max(1, min($request->integer('per_page', 15), 100));
+
+        $query = SupplyBatch::where('supplier_id', $supplier->id)
+            ->with([
+                'shop:id,name',
+                'inventories' => fn ($q) => $q->select('id', 'supply_batch_id', 'product_id', 'serial_number', 'extra_serial_number', 'purchase_price', 'status')
+                    ->with('product:id,name'),
+                'accessories' => fn ($q) => $q->select('id', 'supply_batch_id', 'product_id', 'barcode', 'quantity', 'purchase_price')
+                    ->with('product:id,name'),
+            ])
+            ->withCount(['inventories', 'accessories']);
+
+        return response()->json(
+            $query->orderByDesc('batch_date')->orderByDesc('id')->paginate($perPage)
+        );
+    }
+
     public function update(UpdateSupplierRequest $request, Supplier $supplier): JsonResponse
     {
         $supplier->update($request->validated());
 
         return response()->json($supplier);
+    }
+
+    /**
+     * Postavshik qarzini to'lash (погашение долга). Kassadan chiqim yaratadi
+     * (Transaction) va supplier.balance'ni kamaytiradi.
+     */
+    public function storePayment(StoreSupplierPaymentRequest $request, Supplier $supplier): JsonResponse
+    {
+        try {
+            $payment = $this->paymentService->pay($supplier, $request->validated());
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json([
+            'supplier' => $supplier->fresh(),
+            'payment' => $payment,
+        ], 201);
     }
 
     public function destroy(Supplier $supplier): JsonResponse

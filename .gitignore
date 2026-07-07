@@ -5,6 +5,8 @@
 /public/storage
 /storage/*.key
 /storage/pail
+# Tenant-specific cache/framework storage (stancl/tenancy, "tenant<id>"/"tenant_<id>" papkalar)
+/storage/tenant*/
 /vendor
 .env
 .env.backup

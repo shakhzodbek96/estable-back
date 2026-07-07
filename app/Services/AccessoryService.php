@@ -278,9 +278,13 @@ class AccessoryService
     public function deleteItem(Accessory $accessory): void
     {
         DB::transaction(function () use ($accessory) {
+            $contribution = (float) $accessory->purchase_price * (int) $accessory->quantity;
+
             if ($accessory->investor_id) {
-                $contribution = (float) $accessory->purchase_price * (int) $accessory->quantity;
                 $this->reverseAccessoryPurchase($accessory, $contribution);
+            } else {
+                // Nasiya (credit) partiyasidan bo'lsa — postavshik qarzini kamaytiramiz.
+                $this->batches->reverseCreditForItem($accessory->supply_batch_id, $contribution);
             }
             $accessory->delete();
         });

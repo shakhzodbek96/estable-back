@@ -17,4 +17,5 @@ enum TransactionType: string
     case InvestorProfitShare = 'investor_profit_share'; // do'kon ulushi (dividend yechilganda investordan olingan foyda)
     case Expense = 'expense';       // Kassa: prochie rasxodlar
     case Withdrawal = 'withdrawal'; // Kassa: izyatie (egaga pul berish)
+    case SupplierPayment = 'supplier_payment'; // Kassa: postavshik qarzini to'lash (погашение долга)
 }

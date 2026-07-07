@@ -220,6 +220,8 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::apiResource('investors', InvestorController::class);
     Route::apiResource('partners', PartnerController::class);
     Route::apiResource('suppliers', SupplierController::class);
+    Route::get('suppliers/{supplier}/batches', [SupplierController::class, 'batches']);
+    Route::post('suppliers/{supplier}/payments', [SupplierController::class, 'storePayment']);
     Route::apiResource('rates', RateController::class)->only(['index', 'store']);
 
     // POS skidka limitlari (faqat admin o'rnatadi)

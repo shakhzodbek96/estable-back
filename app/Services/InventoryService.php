@@ -208,9 +208,13 @@ class InventoryService
     public function deleteItem(Inventory $inventory): void
     {
         DB::transaction(function () use ($inventory) {
+            $contribution = (float) $inventory->purchase_price + (float) $inventory->extra_cost;
+
             if ($inventory->investor_id) {
-                $contribution = (float) $inventory->purchase_price + (float) $inventory->extra_cost;
                 $this->reverseInventoryPurchase($inventory, $contribution);
+            } else {
+                // Nasiya (credit) partiyasidan bo'lsa — postavshik qarzini kamaytiramiz.
+                $this->batches->reverseCreditForItem($inventory->supply_batch_id, $contribution);
             }
             $inventory->delete();
         });
@@ -272,6 +276,15 @@ class InventoryService
             $inventories = collect();
             $totalCost = 0.0;
 
+            // Партия (ixtiyoriy) — postavshik/manba berilsa yaratiladi (butun faylga bitta).
+            $batch = $this->batches->createForIntake($data, $data['shop_id']);
+            $isCredit = $this->batches->isCredit($batch);
+
+            // Nasiya (credit) kirimida investor ishtirok etmaydi.
+            if ($isCredit) {
+                $data['investor_id'] = null;
+            }
+
             foreach ($data['rows'] as $row) {
                 // Dinamik atributlar — har qator uchun alohida snapshot (import ustunlaridan).
                 $customAttributes = $this->attributes->snapshot($row['custom_attributes'] ?? null, AttributeScope::Serial);
@@ -289,6 +302,7 @@ class InventoryService
                     'state' => $row['state'] ?? 'new',
                     'notes' => $row['notes'] ?? null,
                     'custom_attributes' => $customAttributes,
+                    'supply_batch_id' => $batch?->id,
                     'shop_id' => $data['shop_id'],
                     'investor_id' => $data['investor_id'] ?? null,
                     'created_by' => auth()->id(),
@@ -297,7 +311,13 @@ class InventoryService
                 $totalCost += (float) $row['purchase_price'];
             }
 
-            if ($totalCost > 0) {
+            // Partiya total_cost'ini yozamiz; nasiya bo'lsa postavshik qarzini oshiramiz.
+            if ($batch) {
+                $this->batches->finalize($batch, $totalCost);
+            }
+
+            // Nasiya — kassadan chiqim YO'Q (keyin postavshikka to'lanadi).
+            if (! $isCredit && $totalCost > 0) {
                 $rate = Rate::current();
                 $investorId = !empty($data['investor_id']) ? $data['investor_id'] : null;
 

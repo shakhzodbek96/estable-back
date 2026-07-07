@@ -14,6 +14,7 @@ use App\Services\AccessoryService;
 use App\Services\ProductImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -165,6 +166,13 @@ class AccessoryController extends Controller
             'shop_id' => ['required', 'integer', 'exists:shops,id'],
             'invoice_number' => ['required', 'string', 'max:255'],
             'investor_id' => ['nullable', 'integer', 'exists:investors,id'],
+            // Партия / Поставщик (ixtiyoriy, butun faylga bitta).
+            'supplier_id' => ['nullable', 'integer', 'exists:suppliers,id', Rule::requiredIf(fn () => $request->input('payment_mode') === 'credit')],
+            'supplier_name' => ['nullable', 'string', 'max:255'],
+            'batch_date' => ['nullable', 'date'],
+            'payment_mode' => ['nullable', 'in:paid,credit'],
+        ], [
+            'supplier_id.required' => 'Для покупки в долг выберите поставщика.',
         ]);
 
         try {
@@ -245,6 +253,10 @@ class AccessoryController extends Controller
             'shop_id' => $data['shop_id'],
             'invoice_number' => $data['invoice_number'],
             'investor_id' => $data['investor_id'] ?? null,
+            'supplier_id' => $data['supplier_id'] ?? null,
+            'supplier_name' => $data['supplier_name'] ?? null,
+            'batch_date' => $data['batch_date'] ?? null,
+            'payment_mode' => $data['payment_mode'] ?? null,
             'batches' => $batchesWithProduct->all(),
         ];
 
