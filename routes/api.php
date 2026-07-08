@@ -239,6 +239,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])->prefix('admin')->group(functi
     Route::get('settings/telegram', [SettingController::class, 'telegramConfig']);
     Route::put('settings/telegram', [SettingController::class, 'updateTelegramConfig']);
     Route::post('settings/telegram/send', [SettingController::class, 'sendTelegramNow']);
+    // Xabar shablonlari (foydalanuvchi tahrirlaydi, 3 soat keshlanadi)
+    Route::get('settings/telegram/templates', [SettingController::class, 'telegramTemplates']);
+    Route::put('settings/telegram/templates', [SettingController::class, 'updateTelegramTemplates']);
 
     // Inventories
     Route::get('inventories/search', [InventoryController::class, 'search']);

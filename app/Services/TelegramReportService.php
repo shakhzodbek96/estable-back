@@ -20,6 +20,7 @@ class TelegramReportService
     public function __construct(
         private ReportService $reports,
         private TelegramService $telegram,
+        private TelegramTemplateService $templates,
     ) {
     }
 
@@ -74,7 +75,7 @@ class TelegramReportService
             return ['ok' => false, 'error' => 'Не указан Chat ID для продаж.'];
         }
 
-        $sale = Sale::with(['customer:id,name', 'seller:id,name', 'items:id,sale_id,quantity'])->find($saleId);
+        $sale = Sale::with(['customer:id,name', 'seller:id,name', 'shop:id,name', 'items:id,sale_id,quantity'])->find($saleId);
 
         if (! $sale) {
             return ['ok' => false, 'skipped' => true, 'error' => null];
@@ -197,22 +198,19 @@ class TelegramReportService
         // kabi qiymatlar enum'da bo'lmasligi mumkin — xom qiymatni o'qiymiz (cast'siz).
         $method = (string) ($sale->getRawOriginal('payment_method') ?? '');
 
-        $L = [];
-        $L[] = '🧾 <b>Продажа №' . (int) $sale->id . '</b>';
-        $L[] = '🕒 ' . $when;
-        if ($sale->seller) {
-            $L[] = 'Продавец: ' . $esc($sale->seller->name);
-        }
-        if ($sale->customer) {
-            $L[] = 'Клиент: ' . $esc($sale->customer->name);
-        }
-        $L[] = 'Товаров: ' . (int) $sale->items->sum('quantity');
-        if ($method !== '') {
-            $L[] = 'Оплата: ' . $this->methodLabel($method);
-        }
-        $L[] = 'Сумма: <b>' . $money($sale->total_price) . '</b>';
+        // Shablon uchun ma'lumot — dinamik matnlar esc'lanadi (raqamlar xavfsiz).
+        $data = [
+            'sale_id' => (string) (int) $sale->id,
+            'datetime' => $when,
+            'seller' => $sale->seller ? $esc($sale->seller->name) : '—',
+            'customer' => $sale->customer ? $esc($sale->customer->name) : '—',
+            'items_count' => (string) (int) $sale->items->sum('quantity'),
+            'payment' => $method !== '' ? $this->methodLabel($method) : '—',
+            'total' => $money($sale->total_price),
+            'shop' => $sale->shop ? $esc($sale->shop->name) : '—',
+        ];
 
-        return implode("\n", $L);
+        return $this->templates->render('sale', $data);
     }
 
     /** To'lov turi kodini ruscha nomiga o'giradi. */

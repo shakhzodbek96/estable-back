@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Setting;
 use App\Models\TelegramConfig;
 use App\Services\TelegramReportService;
+use App\Services\TelegramTemplateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -174,6 +175,26 @@ class SettingController extends Controller
             'bot_configured' => true,
             'bot_username' => TelegramConfig::current()?->bot_username,
         ]);
+    }
+
+    /** Telegram xabar shablonlari (joriy + default + placeholder'lar). */
+    public function telegramTemplates(TelegramTemplateService $service): JsonResponse
+    {
+        return response()->json(['templates' => $service->forApi()]);
+    }
+
+    /** Shablonlarni saqlaydi (kesh avtomatik tozalanadi). */
+    public function updateTelegramTemplates(Request $request, TelegramTemplateService $service): JsonResponse
+    {
+        $rules = [];
+        foreach (array_keys(TelegramTemplateService::REGISTRY) as $type) {
+            $rules[$type] = ['nullable', 'string', 'max:' . TelegramTemplateService::MAX_LENGTH];
+        }
+
+        $data = $request->validate($rules);
+        $service->save($data);
+
+        return response()->json(['templates' => $service->forApi()]);
     }
 
     /**

@@ -26,6 +26,9 @@ class Setting extends Model
     // ['notify_on_sale', 'sale_chat_id', 'daily_report_enabled', 'report_chat_id', 'send_hour']
     public const TELEGRAM_BOT_CONFIG = 'telegram_bot_config';
 
+    // Tenant Telegram xabar shablonlari (foydalanuvchi tahrirlaydi): ['sale' => '...']
+    public const TELEGRAM_TEMPLATES = 'telegram_templates';
+
     protected $fillable = [
         'key',
         'payload',
